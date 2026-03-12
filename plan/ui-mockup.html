@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent Orchestrator — Dashboard</title>
+<style>
+  /* ── Reset & Base ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:        #0d1117;
+    --bg2:       #161b22;
+    --bg3:       #21262d;
+    --border:    #30363d;
+    --border2:   #3d4450;
+    --text:      #c9d1d9;
+    --text2:     #8b949e;
+    --text3:     #6e7681;
+    --accent:    #58a6ff;
+    --accent2:   #1f6feb;
+    --green:     #3fb950;
+    --green-dim: #1a3726;
+    --yellow:    #d29922;
+    --yellow-dim:#2d2208;
+    --orange:    #f0883e;
+    --orange-dim:#2d1a08;
+    --red:       #f85149;
+    --red-dim:   #2d1317;
+    --purple:    #a371f7;
+    --purple-dim:#1e1230;
+    --cyan:      #39d353;
+    --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono:      'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+    --sidebar-w: 220px;
+    --topbar-h:  54px;
+  }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; display: flex; overflow: hidden; }
+
+  /* ── Scrollbar ─────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg2); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ── Sidebar ───────────────────────────────────────────────── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-height: 100vh;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    z-index: 100;
+  }
+  .sidebar-logo {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo .logo-mark {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.3px;
+  }
+  .sidebar-logo .logo-icon {
+    width: 30px; height: 30px; background: var(--accent2);
+    border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 16px; flex-shrink: 0;
+  }
+  .sidebar-logo .version {
+    font-size: 10px; color: var(--text3); margin-top: 2px;
+    font-weight: 400;
+  }
+  .sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+  .nav-section { padding: 12px 16px 4px; font-size: 10px; font-weight: 600;
+    color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 16px; cursor: pointer;
+    font-size: 13px; color: var(--text2);
+    border-left: 2px solid transparent;
+    transition: all .15s;
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: rgba(88,166,255,.08); color: var(--accent);
+    border-left-color: var(--accent); }
+  .nav-item .icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+  .nav-badge { margin-left: auto; background: var(--red); color: #fff;
+    font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+  .nav-badge.green { background: var(--green); }
+  .sidebar-footer {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text3);
+  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.red { background: var(--red); }
+  .status-dot.yellow { background: var(--yellow); }
+
+  /* ── Main area ─────────────────────────────────────────────── */
+  .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; overflow: hidden; }
+
+  /* ── Topbar ────────────────────────────────────────────────── */
+  .topbar {
+    height: var(--topbar-h); background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; position: sticky; top: 0; z-index: 50;
+    flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 8px; }
+  .topbar-title { font-size: 15px; font-weight: 600; color: var(--text); }
+  .topbar-sub { font-size: 12px; color: var(--text3); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border); transition: all .15s;
+    font-family: var(--font); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  .btn-primary:hover { background: #388bfd; }
+  .btn-default { background: var(--bg3); color: var(--text); }
+  .btn-default:hover { background: var(--border); }
+  .btn-ghost { background: transparent; color: var(--text2); border-color: transparent; }
+  .btn-ghost:hover { color: var(--text); background: var(--bg3); }
+  .btn-danger { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn-green { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+
+  /* ── Content ───────────────────────────────────────────────── */
+  .content { flex: 1; overflow-y: auto; padding: 24px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Cards / Grid ──────────────────────────────────────────── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px;
+  }
+  .card-sm { padding: 14px 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .card-sub { font-size: 11px; color: var(--text3); }
+
+  /* ── Project Cards ─────────────────────────────────────────── */
+  .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 20px; }
+  .project-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; cursor: pointer;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .project-card:hover { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2); }
+  .project-card-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  .project-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .project-desc { font-size: 12px; color: var(--text3); margin-top: 3px; }
+  .project-card-body { padding: 14px 18px; }
+  .project-card-footer {
+    padding: 10px 18px; background: rgba(255,255,255,.02);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── Phase Badge ───────────────────────────────────────────── */
+  .phase-badge {
+    padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .phase-IDLE           { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
+  .phase-ANALYZING      { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .phase-AWAITING_REVIEW{ background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(240,136,62,.3); }
+  .phase-IMPLEMENTING   { background: var(--accent2); color: #fff; border: 1px solid var(--accent2); }
+  .phase-ALL_ISSUES_DONE{ background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(163,113,247,.3); }
+  .phase-MR_CREATED     { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(163,113,247,.3); }
+  .phase-AWAITING_MR_REVIEW { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .phase-COMPLETE       { background: var(--green-dim); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .phase-ERROR          { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+
+  /* ── Progress Bar ──────────────────────────────────────────── */
+  .progress-wrap { margin: 10px 0 6px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text3); margin-bottom: 5px; }
+  .progress-bar { height: 4px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width .4s; }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.orange { background: var(--orange); }
+
+  /* ── Repo Tags ─────────────────────────────────────────────── */
+  .tag-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tag { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 500;
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text2); }
+  .tag.frontend { background: rgba(88,166,255,.1); border-color: rgba(88,166,255,.3); color: var(--accent); }
+  .tag.backend  { background: rgba(63,185,80,.1); border-color: rgba(63,185,80,.3); color: var(--green); }
+  .tag.infra    { background: rgba(163,113,247,.1); border-color: rgba(163,113,247,.3); color: var(--purple); }
+  .tag.fullstack{ background: rgba(240,136,62,.1); border-color: rgba(240,136,62,.3); color: var(--orange); }
+
+  /* ── Stat Numbers ──────────────────────────────────────────── */
+  .stats-row { display: flex; gap: 20px; margin-top: 12px; }
+  .stat { text-align: center; }
+  .stat-num { font-size: 20px; font-weight: 700; color: var(--text); }
+  .stat-lbl { font-size: 10px; color: var(--text3); margin-top: 1px; }
+
+  /* ── Section Header ────────────────────────────────────────── */
+  .section-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .section-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+
+  /* ── Table ─────────────────────────────────────────────────── */
+  .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--text3); background: var(--bg3); border-bottom: 1px solid var(--border);
+    text-transform: uppercase; letter-spacing: 0.5px; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,.02); }
+  tbody td { padding: 10px 16px; color: var(--text); vertical-align: middle; }
+  .td-mono { font-family: var(--mono); font-size: 12px; color: var(--text2); }
+
+  /* ── Timeline/Phase Steps ──────────────────────────────────── */
+  .phase-steps { display: flex; align-items: center; gap: 0; margin: 16px 0; overflow-x: auto; padding-bottom: 4px; }
+  .phase-step {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 80px; gap: 6px; position: relative; flex: 1;
+  }
+  .phase-step-dot {
+    width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border2);
+    background: var(--bg3); display: flex; align-items: center; justify-content: center;
+    font-size: 12px; z-index: 1; transition: all .3s;
+  }
+  .phase-step-dot.done { background: var(--green); border-color: var(--green); color: #fff; }
+  .phase-step-dot.active { background: var(--accent2); border-color: var(--accent); color: #fff;
+    box-shadow: 0 0 12px rgba(88,166,255,.5); }
+  .phase-step-dot.error { background: var(--red); border-color: var(--red); color: #fff; }
+  .phase-step-label { font-size: 10px; color: var(--text3); text-align: center; }
+  .phase-step-label.active { color: var(--accent); font-weight: 600; }
+  .phase-step-label.done { color: var(--green); }
+  .phase-connector {
+    height: 2px; flex: 1; background: var(--border); margin: 0 -4px; margin-top: -22px; z-index: 0;
+  }
+  .phase-connector.done { background: var(--green); }
+
+  /* ── Log Terminal ──────────────────────────────────────────── */
+  .log-terminal {
+    background: #010409; border: 1px solid var(--border);
+    border-radius: 10px; font-family: var(--mono); font-size: 12px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .log-toolbar {
+    padding: 8px 14px; background: var(--bg3); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .log-toolbar input {
+    flex: 1; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 5px 10px; color: var(--text);
+    font-size: 12px; font-family: var(--mono); outline: none;
+  }
+  .log-toolbar input:focus { border-color: var(--accent2); }
+  .log-body { flex: 1; overflow-y: auto; padding: 12px 16px; min-height: 320px; max-height: 480px; line-height: 1.7; }
+  .log-line { display: flex; gap: 10px; }
+  .log-time { color: var(--text3); min-width: 78px; flex-shrink: 0; }
+  .log-level { min-width: 36px; font-weight: 700; flex-shrink: 0; }
+  .log-module { min-width: 90px; color: #7ee8a2; flex-shrink: 0; }
+  .log-msg { color: var(--text); flex: 1; word-break: break-word; }
+  .log-INFO  .log-level { color: #58a6ff; }
+  .log-WARN  .log-level { color: var(--yellow); }
+  .log-ERROR .log-level { color: var(--red); }
+  .log-DEBUG .log-level { color: var(--text3); }
+  .log-DEBUG .log-msg   { color: var(--text3); }
+  .log-kv { color: #79c0ff; font-size: 11px; margin-left: 8px; }
+  .log-kv span { color: var(--text2); }
+
+  /* ── Forms ─────────────────────────────────────────────────── */
+  .form-section { margin-bottom: 28px; }
+  .form-section-title {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    padding-bottom: 10px; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .form-row.full { grid-template-columns: 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: 12px; font-weight: 500; color: var(--text2); }
+  .label-hint { font-size: 11px; color: var(--text3); font-weight: 400; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; color: var(--text); font-size: 13px; font-family: var(--font);
+    outline: none; transition: border-color .15s; width: 100%;
+  }
+  input[type=text]:focus, input[type=password]:focus,
+  input[type=number]:focus, select:focus, textarea:focus {
+    border-color: var(--accent2); background: var(--bg2);
+  }
+  select option { background: var(--bg3); }
+  textarea { resize: vertical; min-height: 80px; font-family: var(--mono); font-size: 12px; }
+  .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+  .toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
+  .toggle input { display: none; }
+  .toggle-track {
+    width: 36px; height: 20px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; transition: all .2s; position: relative;
+  }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; background: var(--text3);
+    border-radius: 50%; transition: all .2s;
+  }
+  .toggle input:checked + .toggle-track { background: var(--accent2); border-color: var(--accent2); }
+  .toggle input:checked + .toggle-track::after { transform: translateX(16px); background: #fff; }
+  .toggle-label { font-size: 13px; color: var(--text); }
+
+  /* ── Repo Config Card ──────────────────────────────────────── */
+  .repo-config-card {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 10px; position: relative;
+  }
+  .repo-config-card .remove-btn {
+    position: absolute; top: 10px; right: 12px;
+    background: none; border: none; color: var(--text3); cursor: pointer;
+    font-size: 16px; padding: 2px 4px; border-radius: 4px;
+    transition: color .15s;
+  }
+  .repo-config-card .remove-btn:hover { color: var(--red); }
+
+  /* ── Event Queue ───────────────────────────────────────────── */
+  .event-item {
+    display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .event-item:last-child { border-bottom: none; }
+  .event-icon { width: 28px; height: 28px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .event-icon.push    { background: var(--green-dim); }
+  .event-icon.comment { background: rgba(88,166,255,.1); }
+  .event-icon.mr      { background: var(--purple-dim); }
+  .event-icon.trigger { background: var(--orange-dim); }
+  .event-body { flex: 1; min-width: 0; }
+  .event-title { color: var(--text); font-weight: 500; }
+  .event-meta  { color: var(--text3); font-size: 11px; margin-top: 2px; }
+  .event-time  { color: var(--text3); font-size: 11px; flex-shrink: 0; }
+
+  /* ── Misc ──────────────────────────────────────────────────── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text3); }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .badge-blue   { background: rgba(88,166,255,.1); color: var(--accent); border: 1px solid rgba(88,166,255,.3); }
+  .badge-green  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .badge-red    { background: var(--red-dim); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+  .badge-yellow { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .flex-gap { display: flex; align-items: center; gap: 8px; }
+  .ml-auto { margin-left: auto; }
+  .mt-4 { margin-top: 4px; }
+  .mt-8 { margin-top: 8px; }
+  .mt-12 { margin-top: 12px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-20 { margin-top: 20px; }
+  .mr-auto { margin-right: auto; }
+  .text-sm { font-size: 12px; color: var(--text2); }
+  .text-xs { font-size: 11px; color: var(--text3); }
+  .text-mono { font-family: var(--mono); font-size: 12px; }
+
+  /* ── Toast ─────────────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 999;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px; font-size: 13px;
+    color: var(--text); box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    display: flex; align-items: center; gap: 10px;
+    transform: translateY(80px); opacity: 0;
+    transition: all .3s; pointer-events: none;
+    min-width: 260px;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error   { border-left: 3px solid var(--red); }
+
+  /* ── Modal ─────────────────────────────────────────────────── */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    z-index: 200; display: none; align-items: center; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+    width: 520px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal-header {
+    padding: 18px 20px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close { background: none; border: none; color: var(--text3); cursor: pointer;
+    font-size: 18px; padding: 4px; border-radius: 4px; transition: color .15s; }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ── Responsive ────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .grid-3 { grid-template-columns: 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">
+      <div class="logo-icon">🤖</div>
+      <div>
+        <div>AI Agent</div>
+        <div class="version">Orchestrator v1.0</div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" onclick="navigate('dashboard')">
+      <span class="icon">⬡</span> Dashboard
+    </div>
+    <div class="nav-item" onclick="navigate('projects')">
+      <span class="icon">📁</span> Projects
+      <span class="nav-badge green">3</span>
+    </div>
+
+    <div class="nav-section">Monitoring</div>
+    <div class="nav-item" onclick="navigate('logs')">
+      <span class="icon">📋</span> Live Logs
+      <span class="nav-badge">●</span>
+    </div>
+    <div class="nav-item" onclick="navigate('queue')">
+      <span class="icon">⚡</span> Event Queue
+    </div>
+
+    <div class="nav-section">Configuration</div>
+    <div class="nav-item" onclick="navigate('add-project')">
+      <span class="icon">＋</span> Add Project
+    </div>
+    <div class="nav-item" onclick="navigate('settings')">
+      <span class="icon">⚙</span> Settings
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div style="display:flex;align-items:center;margin-bottom:4px">
+      <span class="status-dot green"></span> Orchestrator running
+    </div>
+    <div style="display:flex;align-items:center">
+      <span class="status-dot green"></span> Redis connected
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-title" id="topbar-title">Dashboard</span>
+      <span class="topbar-sub" id="topbar-sub">— Overview of all projects</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm">🔔</button>
+      <button class="btn btn-default btn-sm" onclick="navigate('add-project')">＋ New Project</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ════════════ PAGE: DASHBOARD ════════════ -->
+    <div id="page-dashboard" class="page active">
+
+      <!-- Stats Row -->
+      <div class="grid-3">
+        <div class="card card-sm">
+          <div class="text-xs">Active Projects</div>
+          <div style="font-size:28px;font-weight:700;color:var(--text);margin:6px 0">3</div>
+          <div class="text-xs">2 implementing · 1 awaiting review</div>
+        </div>
+        <div class="card card-sm">
+          <div class="text-xs">Issues This Week</div>
+          <div style="font-size:28px;font-weight:700;color:var(--green);margin:6px 0">24 <span style="font-size:14px;color:var(--text3)">/ 31</span></div>
+          <div class="text-xs">77% completion rate</div>
+        </div>
+        <div class="card card-sm">
+          <div class="text-xs">Agent Cost (7d)</div>
+          <div style="font-size:28px;font-weight:700;color:var(--orange);margin:6px 0">$2.84</div>
+          <div class="text-xs">↑ 12% vs last week</div>
+        </div>
+      </div>
+
+      <!-- Projects Grid -->
+      <div class="section-hd mt-20">
+        <div>
+          <div class="section-title">Projects</div>
+          <div class="section-sub">3 active · Last updated 2 min ago</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="navigate('add-project')">＋ New Project</button>
+      </div>
+
+      <div class="project-grid">
+
+        <!-- Project Card 1: E-Commerce Platform -->
+        <div class="project-card" onclick="navigate('project-detail', {id:1})">
+          <div class="project-card-header">
+            <div>
+              <div class="project-name">🛒 E-Commerce Platform</div>
+              <div class="project-desc">Multi-service · 3 repos · gitlab.company.com/ecommerce</div>
+            </div>
+            <span class="phase-badge phase-IMPLEMENTING">IMPLEMENTING</span>
+          </div>
+          <div class="project-card-body">
+            <div class="tag-list">
+              <span class="tag frontend">frontend</span>
+              <span class="tag backend">backend</span>
+              <span class="tag infra">infra</span>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-label">
+                <span>Issues progress</span>
+                <span style="color:var(--accent)">7 / 12 done</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill" style="width:58%"></div></div>
+            </div>
+            <div class="text-xs" style="color:var(--text3)">🔄 Working on issue #8 — Implement checkout API · <span style="color:var(--green)">agent active</span></div>
+          </div>
+          <div class="project-card-footer">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('logs')">📋 Logs</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">⚡ Trigger</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('add-project')">⚙ Config</button>
+            <span class="ml-auto text-xs">updated 30s ago</span>
+          </div>
+        </div>
+
+        <!-- Project Card 2: CRM System -->
+        <div class="project-card" onclick="navigate('project-detail', {id:2})">
+          <div class="project-card-header">
+            <div>
+              <div class="project-name">📊 CRM System</div>
+              <div class="project-desc">Monorepo · 1 repo · gitlab.company.com/crm</div>
+            </div>
+            <span class="phase-badge phase-AWAITING_REVIEW">AWAITING REVIEW</span>
+          </div>
+          <div class="project-card-body">
+            <div class="tag-list">
+              <span class="tag fullstack">fullstack</span>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-label">
+                <span>Issues progress</span>
+                <span style="color:var(--green)">5 / 5 done</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill green" style="width:100%"></div></div>
+            </div>
+            <div class="text-xs" style="color:var(--text3)">⏳ MR !3 created · Waiting for user approval on plan</div>
+          </div>
+          <div class="project-card-footer">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('logs')">📋 Logs</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">⚡ Trigger</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('add-project')">⚙ Config</button>
+            <span class="ml-auto text-xs">updated 5m ago</span>
+          </div>
+        </div>
+
+        <!-- Project Card 3: Blog API -->
+        <div class="project-card" onclick="navigate('project-detail', {id:3})">
+          <div class="project-card-header">
+            <div>
+              <div class="project-name">📝 Blog API</div>
+              <div class="project-desc">Backend · 2 repos · gitlab.company.com/blog</div>
+            </div>
+            <span class="phase-badge phase-COMPLETE">COMPLETE</span>
+          </div>
+          <div class="project-card-body">
+            <div class="tag-list">
+              <span class="tag backend">backend</span>
+              <span class="tag infra">infra</span>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-label">
+                <span>Issues progress</span>
+                <span style="color:var(--green)">8 / 8 done</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill green" style="width:100%"></div></div>
+            </div>
+            <div class="text-xs" style="color:var(--green)">✅ MR !2 merged to main · 2026-03-11</div>
+          </div>
+          <div class="project-card-footer">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('logs')">📋 Logs</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">♻ Re-run</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();navigate('add-project')">⚙ Config</button>
+            <span class="ml-auto text-xs">completed 1d ago</span>
+          </div>
+        </div>
+
+      </div><!-- /project-grid -->
+
+      <!-- Recent Events -->
+      <div class="section-hd mt-20">
+        <div class="section-title">Recent Events</div>
+        <button class="btn btn-ghost btn-sm" onclick="navigate('queue')">View all →</button>
+      </div>
+      <div class="table-wrap">
+        <div class="event-item">
+          <div class="event-icon comment">💬</div>
+          <div class="event-body">
+            <div class="event-title">Issue comment — #8 E-Commerce Platform</div>
+            <div class="event-meta">@john.doe: "The checkout API should also handle coupon codes"</div>
+          </div>
+          <div class="event-time">32s ago</div>
+        </div>
+        <div class="event-item">
+          <div class="event-icon push">📤</div>
+          <div class="event-body">
+            <div class="event-title">REQUIREMENT_PUSHED — CRM System</div>
+            <div class="event-meta">requirement-crm-v2.md pushed to main by @alice</div>
+          </div>
+          <div class="event-time">8m ago</div>
+        </div>
+        <div class="event-item">
+          <div class="event-icon mr">🔀</div>
+          <div class="event-body">
+            <div class="event-title">MR Approved — Blog API !2</div>
+            <div class="event-meta">@bob approved MR — Phase 4 triggered</div>
+          </div>
+          <div class="event-time">1d ago</div>
+        </div>
+      </div>
+
+    </div><!-- /dashboard -->
+
+
+    <!-- ════════════ PAGE: PROJECT DETAIL ════════════ -->
+    <div id="page-project-detail" class="page">
+
+      <div class="section-hd">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="section-title">🛒 E-Commerce Platform</span>
+            <span class="phase-badge phase-IMPLEMENTING">IMPLEMENTING</span>
+          </div>
+          <div class="section-sub">gitlab.company.com/ecommerce · 3 repos · Created 2026-03-05</div>
+        </div>
+        <div class="flex-gap">
+          <button class="btn btn-default btn-sm" onclick="navigate('logs')">📋 Live Logs</button>
+          <button class="btn btn-primary btn-sm" onclick="openModal('triggerModal')">⚡ Trigger Phase</button>
+        </div>
+      </div>
+
+      <!-- Phase Timeline -->
+      <div class="card">
+        <div class="card-title">Workflow Progress</div>
+        <div class="phase-steps">
+          <div class="phase-step">
+            <div class="phase-step-dot done">✓</div>
+            <div class="phase-step-label done">Phase 1<br>Init</div>
+          </div>
+          <div class="phase-connector done"></div>
+          <div class="phase-step">
+            <div class="phase-step-dot active">⟳</div>
+            <div class="phase-step-label active">Phase 2<br>Implement</div>
+          </div>
+          <div class="phase-connector"></div>
+          <div class="phase-step">
+            <div class="phase-step-dot">3</div>
+            <div class="phase-step-label">Phase 3<br>Review</div>
+          </div>
+          <div class="phase-connector"></div>
+          <div class="phase-step">
+            <div class="phase-step-dot">4</div>
+            <div class="phase-step-label">Phase 4<br>Done</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:12px;gap:12px">
+          <div style="background:var(--bg3);border-radius:8px;padding:12px">
+            <div class="text-xs">Current Issue</div>
+            <div style="font-size:14px;font-weight:600;color:var(--accent);margin-top:4px">#8 — Implement Checkout API</div>
+            <div class="text-xs mt-4">Started 12 min ago · branch: feature/issue-8-checkout-api</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:12px">
+            <div class="text-xs">Issues Progress</div>
+            <div class="progress-wrap" style="margin:6px 0 4px">
+              <div class="progress-bar"><div class="progress-fill" style="width:58%"></div></div>
+            </div>
+            <div class="text-xs">7 done · 1 in progress · 4 pending</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Repos & Issues -->
+      <div class="grid-2 mt-16" style="align-items:start">
+
+        <!-- Repos -->
+        <div>
+          <div class="section-hd" style="margin-bottom:10px">
+            <div class="card-title">Repositories</div>
+            <button class="btn btn-ghost btn-sm" onclick="navigate('add-project')">Edit</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Repo</th><th>Type</th><th>Status</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div style="font-weight:500">repo-frontend</div>
+                    <div class="td-mono">./repo-frontend · ID: 101</div>
+                  </td>
+                  <td><span class="tag frontend">frontend</span></td>
+                  <td><span class="badge badge-blue">active</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div style="font-weight:500">repo-backend</div>
+                    <div class="td-mono">./repo-backend · ID: 102</div>
+                  </td>
+                  <td><span class="tag backend">backend</span></td>
+                  <td><span class="badge badge-blue">active</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div style="font-weight:500">repo-infra</div>
+                    <div class="td-mono">./repo-infra · ID: 103</div>
+                  </td>
+                  <td><span class="tag infra">infra</span></td>
+                  <td><span class="badge">idle</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Issues List -->
+        <div>
+          <div class="section-hd" style="margin-bottom:10px">
+            <div class="card-title">Issues</div>
+            <span class="text-xs">12 total</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>IID</th><th>Title</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td class="td-mono">#1</td><td>Project setup & config</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#2</td><td>Database schema</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#3</td><td>User auth API</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#4</td><td>Product catalog API</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#5</td><td>Cart service</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#6</td><td>Order management</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#7</td><td>Payment integration</td><td><span class="badge badge-green">DONE</span></td></tr>
+                <tr><td class="td-mono">#8</td><td>Checkout API</td><td><span class="badge badge-blue">IN PROGRESS</span></td></tr>
+                <tr><td class="td-mono">#9</td><td>Email notifications</td><td><span class="badge">OPEN</span></td></tr>
+                <tr><td class="td-mono">#10</td><td>Admin dashboard</td><td><span class="badge">OPEN</span></td></tr>
+                <tr><td class="td-mono">#11</td><td>Frontend: product pages</td><td><span class="badge">OPEN</span></td></tr>
+                <tr><td class="td-mono">#12</td><td>Docker deployment</td><td><span class="badge">OPEN</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Recent log snippet -->
+      <div class="mt-16">
+        <div class="section-hd" style="margin-bottom:10px">
+          <div class="card-title">Recent Agent Output</div>
+          <button class="btn btn-ghost btn-sm" onclick="navigate('logs')">Full log →</button>
+        </div>
+        <div class="log-terminal" style="max-height:200px">
+          <div class="log-body" style="min-height:auto">
+            <div class="log-line log-INFO"><span class="log-time">12:24:01</span><span class="log-level">INFO</span><span class="log-module">phase2</span><span class="log-msg">Implementing issue #8 <span class="log-kv">iid:<span>8</span> repo:<span>repo-backend</span></span></span></div>
+            <div class="log-line log-INFO"><span class="log-time">12:24:03</span><span class="log-level">INFO</span><span class="log-module">agent</span><span class="log-msg">Starting agent run (god mode) <span class="log-kv">cwd:<span>/workspace/repo-backend</span></span></span></div>
+            <div class="log-line log-DEBUG"><span class="log-time">12:24:05</span><span class="log-level">DBG</span><span class="log-module">agent</span><span class="log-msg">STEP 1 — Fetching issue details via glab...</span></div>
+            <div class="log-line log-DEBUG"><span class="log-time">12:24:08</span><span class="log-level">DBG</span><span class="log-module">agent</span><span class="log-msg">STEP 2 — Creating branch feature/issue-8-checkout-api</span></div>
+            <div class="log-line log-DEBUG"><span class="log-time">12:24:12</span><span class="log-level">DBG</span><span class="log-module">agent</span><span class="log-msg">STEP 5 — Writing src/routes/checkout.ts...</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /project-detail -->
+
+
+    <!-- ════════════ PAGE: LIVE LOGS ════════════ -->
+    <div id="page-logs" class="page">
+
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Live Logs</div>
+          <div class="section-sub">Real-time agent output stream</div>
+        </div>
+        <div class="flex-gap">
+          <select style="width:180px;font-size:12px;padding:5px 10px" id="log-project-filter">
+            <option>All Projects</option>
+            <option selected>E-Commerce Platform</option>
+            <option>CRM System</option>
+            <option>Blog API</option>
+          </select>
+          <select style="width:110px;font-size:12px;padding:5px 10px">
+            <option>All Levels</option>
+            <option>INFO</option>
+            <option>WARN</option>
+            <option>ERROR</option>
+            <option>DEBUG</option>
+          </select>
+          <button class="btn btn-default btn-sm" id="autoscroll-btn" onclick="toggleAutoscroll()">⬇ Auto-scroll ON</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearLogs()">🗑 Clear</button>
+        </div>
+      </div>
+
+      <div class="log-terminal" id="log-terminal">
+        <div class="log-toolbar">
+          <input type="text" placeholder="Search logs..." id="log-search" oninput="filterLogs()">
+          <button class="btn btn-ghost btn-sm">⬇ Export</button>
+        </div>
+        <div class="log-body" id="log-body">
+          <div class="log-line log-INFO"><span class="log-time">12:23:58</span><span class="log-level">INFO</span><span class="log-module">main</span><span class="log-msg">Starting AI Agent Orchestrator</span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:23:58</span><span class="log-level">INFO</span><span class="log-module">main</span><span class="log-msg">Webhook server started <span class="log-kv">port:<span>3000</span></span></span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:23:59</span><span class="log-level">INFO</span><span class="log-module">redis</span><span class="log-msg">Redis connected</span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:24:00</span><span class="log-level">INFO</span><span class="log-module">orchestrator</span><span class="log-msg">Orchestrator started — waiting for events</span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:24:01</span><span class="log-level">INFO</span><span class="log-module">orchestrator</span><span class="log-msg">Processing event <span class="log-kv">type:<span>ISSUE_COMMENT</span> projectId:<span>101</span></span></span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:24:01</span><span class="log-level">INFO</span><span class="log-module">phase2</span><span class="log-msg">Implementing issue #8 <span class="log-kv">iid:<span>8</span> repo:<span>repo-backend</span></span></span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:24:03</span><span class="log-level">INFO</span><span class="log-module">agent-runner</span><span class="log-msg">Starting agent run (god mode) <span class="log-kv">cwd:<span>/workspace/repo-backend</span></span></span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:03</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Skipping deploy — .claude/ already exists (volume-mounted)</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:05</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 1 — Fetching issue details via glab...</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:08</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: Fetched issue #8 title: "Implement Checkout API"</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:10</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 2 — Creating branch feature/issue-8-checkout-api</span></div>
+          <div class="log-line log-INFO"><span class="log-time">12:24:11</span><span class="log-level">INFO</span><span class="log-module">state-manager</span><span class="log-msg">Issue status updated <span class="log-kv">iid:<span>8</span> status:<span>IN_PROGRESS</span></span></span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:12</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 3 — Updating issue label to status:in-progress</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:15</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 4 — Reading docs/architecture.md for context</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:18</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 5 — Writing src/routes/checkout.ts...</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:22</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: Writing src/services/checkout.service.ts...</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:28</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 6 — Writing tests/checkout.test.ts...</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:31</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: STEP 7 — Using /commit skill...</span></div>
+          <div class="log-line log-DEBUG"><span class="log-time">12:24:33</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: git add -A && git commit -m "feat: implement #8 - Implement Checkout API"</span></div>
+          <div class="log-line log-DEBUG" id="last-log"><span class="log-time">12:24:35</span><span class="log-level">DBG</span><span class="log-module">agent-runner</span><span class="log-msg">Agent progress: Committed: a4c8f91 · STEP 8 — Pushing...</span></div>
+        </div>
+      </div>
+
+      <!-- Log stats -->
+      <div class="flex-gap mt-12 text-xs">
+        <span class="badge badge-blue">INFO: 8</span>
+        <span class="badge badge-yellow">WARN: 0</span>
+        <span class="badge badge-red">ERROR: 0</span>
+        <span style="color:var(--text3)">DEBUG: 12</span>
+        <span class="ml-auto" style="color:var(--text3)" id="log-count">20 lines · streaming live</span>
+      </div>
+
+    </div><!-- /logs -->
+
+
+    <!-- ════════════ PAGE: EVENT QUEUE ════════════ -->
+    <div id="page-queue" class="page">
+
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Event Queue</div>
+          <div class="section-sub">Redis FIFO queue · 2 pending · 0 in dead-letter</div>
+        </div>
+        <div class="flex-gap">
+          <span class="badge badge-blue">2 pending</span>
+          <button class="btn btn-default btn-sm">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div class="grid-2" style="align-items:start;gap:16px">
+        <div>
+          <div class="card-title" style="margin-bottom:10px">Pending Events</div>
+          <div class="table-wrap">
+            <div class="event-item">
+              <div class="event-icon comment">💬</div>
+              <div class="event-body">
+                <div class="event-title">ISSUE_COMMENT</div>
+                <div class="event-meta">projectId: 101 · issue #8 · @john.doe</div>
+                <div class="event-meta text-mono">id: a8f3-bc12</div>
+              </div>
+              <div style="text-align:right">
+                <div class="event-time">32s ago</div>
+                <button class="btn btn-danger btn-sm mt-4">Nack</button>
+              </div>
+            </div>
+            <div class="event-item">
+              <div class="event-icon trigger">⚡</div>
+              <div class="event-body">
+                <div class="event-title">TRIGGER_PHASE</div>
+                <div class="event-meta">projectId: 102 · phase: review</div>
+                <div class="event-meta text-mono">id: d4e1-9a7f</div>
+              </div>
+              <div style="text-align:right">
+                <div class="event-time">4m ago</div>
+                <button class="btn btn-danger btn-sm mt-4">Nack</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-title" style="margin-bottom:10px">Dead-Letter Queue</div>
+          <div class="table-wrap">
+            <div style="padding:40px;text-align:center;color:var(--text3)">
+              <div style="font-size:32px;margin-bottom:8px">✓</div>
+              <div>No failed events</div>
+            </div>
+          </div>
+
+          <div class="card-title mt-16" style="margin-bottom:10px">Manual Trigger</div>
+          <div class="card">
+            <div class="form-group" style="margin-bottom:10px">
+              <label>Project</label>
+              <select>
+                <option>E-Commerce Platform (ID: 101)</option>
+                <option>CRM System (ID: 102)</option>
+                <option>Blog API (ID: 103)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Phase</label>
+              <select>
+                <option>init</option>
+                <option>implement</option>
+                <option>review</option>
+                <option>done</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" style="width:100%" onclick="showToast('⚡ TRIGGER_PHASE event enqueued', 'success')">⚡ Enqueue Trigger</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /queue -->
+
+
+    <!-- ════════════ PAGE: ADD/EDIT PROJECT ════════════ -->
+    <div id="page-add-project" class="page">
+
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Add / Edit Project</div>
+          <div class="section-sub">Configure a project with one or more GitLab repositories</div>
+        </div>
+        <div class="flex-gap">
+          <button class="btn btn-ghost" onclick="navigate('dashboard')">Cancel</button>
+          <button class="btn btn-primary" onclick="showToast('✅ Project saved successfully', 'success')">Save Project</button>
+        </div>
+      </div>
+
+      <!-- Basic Info -->
+      <div class="card">
+        <div class="form-section">
+          <div class="form-section-title">🗂 Project Info</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Project Name</label>
+              <input type="text" value="E-Commerce Platform" placeholder="My Project">
+            </div>
+            <div class="form-group">
+              <label>Description <span class="label-hint">(optional)</span></label>
+              <input type="text" value="Multi-service e-commerce system" placeholder="Brief description">
+            </div>
+          </div>
+        </div>
+
+        <!-- Repos -->
+        <div class="form-section">
+          <div class="form-section-title">📦 Repositories</div>
+
+          <div id="repos-list">
+            <!-- Repo 1 -->
+            <div class="repo-config-card">
+              <button class="remove-btn" onclick="this.closest('.repo-config-card').remove()">×</button>
+              <div class="form-row" style="margin-bottom:10px">
+                <div class="form-group">
+                  <label>Repository Name</label>
+                  <input type="text" value="repo-frontend" placeholder="e.g. repo-frontend">
+                </div>
+                <div class="form-group">
+                  <label>GitLab Project ID</label>
+                  <input type="number" value="101" placeholder="e.g. 101">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Local Path <span class="label-hint">(relative to WORKSPACE_PATH)</span></label>
+                  <input type="text" value="./repo-frontend" placeholder="./repo-name">
+                </div>
+                <div class="form-group">
+                  <label>Type</label>
+                  <select>
+                    <option value="frontend" selected>frontend</option>
+                    <option value="backend">backend</option>
+                    <option value="infra">infra</option>
+                    <option value="fullstack">fullstack</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group mt-8">
+                <label>Tags <span class="label-hint">(comma-separated)</span></label>
+                <input type="text" value="react, typescript, vite" placeholder="react, nodejs, postgresql">
+              </div>
+            </div>
+
+            <!-- Repo 2 -->
+            <div class="repo-config-card">
+              <button class="remove-btn" onclick="this.closest('.repo-config-card').remove()">×</button>
+              <div class="form-row" style="margin-bottom:10px">
+                <div class="form-group">
+                  <label>Repository Name</label>
+                  <input type="text" value="repo-backend" placeholder="e.g. repo-backend">
+                </div>
+                <div class="form-group">
+                  <label>GitLab Project ID</label>
+                  <input type="number" value="102" placeholder="e.g. 102">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Local Path</label>
+                  <input type="text" value="./repo-backend" placeholder="./repo-name">
+                </div>
+                <div class="form-group">
+                  <label>Type</label>
+                  <select>
+                    <option value="frontend">frontend</option>
+                    <option value="backend" selected>backend</option>
+                    <option value="infra">infra</option>
+                    <option value="fullstack">fullstack</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group mt-8">
+                <label>Tags</label>
+                <input type="text" value="nodejs, express, postgresql" placeholder="react, nodejs, postgresql">
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-default mt-12" onclick="addRepo()" style="width:100%">
+            ＋ Add Repository
+          </button>
+        </div>
+
+        <!-- Workflow -->
+        <div class="form-section">
+          <div class="form-section-title">⚙ Workflow Settings</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Target Branch</label>
+              <input type="text" value="main">
+            </div>
+            <div class="form-group">
+              <label>Branch Prefix</label>
+              <input type="text" value="feature/">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Require Tests</label>
+              <div class="toggle-wrap mt-4">
+                <label class="toggle"><input type="checkbox" checked><div class="toggle-track"></div></label>
+                <span class="toggle-label">Agent must write and pass tests</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Auto Merge</label>
+              <div class="toggle-wrap mt-4">
+                <label class="toggle"><input type="checkbox"><div class="toggle-track"></div></label>
+                <span class="toggle-label">Merge MR automatically on approve</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /add-project -->
+
+
+    <!-- ════════════ PAGE: SETTINGS ════════════ -->
+    <div id="page-settings" class="page">
+
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Global Settings</div>
+          <div class="section-sub">These settings apply to all projects</div>
+        </div>
+        <button class="btn btn-primary" onclick="showToast('✅ Settings saved & config.yaml updated', 'success')">Save Settings</button>
+      </div>
+
+      <div class="grid-2" style="align-items:start;gap:20px">
+        <div>
+
+          <!-- GitLab -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="form-section-title" style="margin-bottom:14px">🦊 GitLab Connection</div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>GitLab Instance URL</label>
+              <input type="text" value="https://gitlab.company.com">
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Access Token <span class="label-hint">(api scope required)</span></label>
+              <input type="password" value="glpat-xxxxxxxxxxxxxxxxxxxx">
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Webhook Secret</label>
+              <input type="password" value="your-webhook-secret-here">
+            </div>
+            <div class="form-group">
+              <label>Bot Username</label>
+              <input type="text" value="ai-agent" placeholder="ai-agent">
+            </div>
+          </div>
+
+          <!-- Redis -->
+          <div class="card">
+            <div class="form-section-title" style="margin-bottom:14px">🗄 Redis</div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Redis URL</label>
+              <input type="text" value="redis://redis:6379">
+            </div>
+            <div class="flex-gap mt-8">
+              <span class="status-dot green"></span>
+              <span class="text-sm">Connected · 2 pending events · 0 dead-letter</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div>
+
+          <!-- Agent / AI -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="form-section-title" style="margin-bottom:14px">🤖 Agent Settings</div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Anthropic API Key</label>
+              <input type="password" value="sk-ant-xxxxxxxxxxxxxxxxxxxx">
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Model</label>
+              <select>
+                <option selected>claude-sonnet-4-6</option>
+                <option>claude-opus-4-6</option>
+                <option>claude-haiku-4-5-20251001</option>
+              </select>
+            </div>
+            <div class="form-row" style="margin-bottom:12px">
+              <div class="form-group">
+                <label>Max Retries</label>
+                <input type="number" value="3" min="1" max="10">
+              </div>
+              <div class="form-group">
+                <label>Timeout (seconds)</label>
+                <input type="number" value="300" min="30">
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Permission Mode</label>
+              <select>
+                <option value="bypassPermissions" selected>bypassPermissions (God Mode)</option>
+                <option value="acceptEdits">acceptEdits</option>
+                <option value="default">default</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>HTML Mockup Framework</label>
+              <select>
+                <option selected>vanilla</option>
+                <option>tailwind</option>
+                <option>bootstrap</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Webhook -->
+          <div class="card">
+            <div class="form-section-title" style="margin-bottom:14px">🪝 Webhook Server</div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Listen Port</label>
+              <input type="number" value="3000">
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Log Level</label>
+              <select>
+                <option>debug</option>
+                <option selected>info</option>
+                <option>warn</option>
+                <option>error</option>
+              </select>
+            </div>
+            <div style="background:var(--bg3);border-radius:6px;padding:10px;margin-top:8px">
+              <div class="text-xs" style="color:var(--text3);margin-bottom:4px">Webhook URL (register in GitLab)</div>
+              <div class="text-mono" style="color:var(--accent)">http://your-server:3000/webhook</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /settings -->
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+
+<!-- ═══════════ MODAL: Trigger Phase ═══════════ -->
+<div class="modal-bg" id="triggerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">⚡ Trigger Phase</div>
+      <button class="modal-close" onclick="closeModal('triggerModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="text-sm" style="margin-bottom:16px">Manually trigger a workflow phase for this project. This enqueues a TRIGGER_PHASE event.</p>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Project</label>
+        <select><option>E-Commerce Platform (ID: 101)</option></select>
+      </div>
+      <div class="form-group">
+        <label>Phase to trigger</label>
+        <select>
+          <option>init — Analyze requirement & create issues</option>
+          <option selected>implement — Start/continue implementation loop</option>
+          <option>review — Create MR</option>
+          <option>done — Merge & cleanup</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('triggerModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('triggerModal');showToast('⚡ TRIGGER_PHASE enqueued for E-Commerce Platform', 'success')">⚡ Trigger</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════ TOAST ═══════════ -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ═══════════ SCRIPTS ═══════════ -->
+<script>
+// ── Navigation ──────────────────────────────────────────────────
+const pageMap = {
+  'dashboard':      { title: 'Dashboard', sub: '— Overview of all projects' },
+  'projects':       { title: 'Projects', sub: '— All projects' },
+  'logs':           { title: 'Live Logs', sub: '— Real-time agent output' },
+  'queue':          { title: 'Event Queue', sub: '— Redis FIFO queue' },
+  'add-project':    { title: 'Add / Edit Project', sub: '— Configure repositories' },
+  'settings':       { title: 'Settings', sub: '— Global configuration' },
+  'project-detail': { title: 'Project Detail', sub: '— E-Commerce Platform' },
+}
+
+function navigate(pageId, params) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
+
+  const targetId = 'page-' + pageId
+  const target = document.getElementById(targetId)
+  if (target) target.classList.add('active')
+
+  const navItem = document.querySelector(`.nav-item[onclick*="'${pageId}'"]`)
+  if (navItem) navItem.classList.add('active')
+
+  const meta = pageMap[pageId] || { title: pageId, sub: '' }
+  document.getElementById('topbar-title').textContent = meta.title
+  document.getElementById('topbar-sub').textContent = meta.sub
+
+  if (pageId === 'logs') startLogStream()
+  if (pageId === 'projects') navigate('dashboard')
+}
+
+// ── Modal ────────────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add('open') }
+function closeModal(id) { document.getElementById(id).classList.remove('open') }
+document.querySelectorAll('.modal-bg').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open') })
+})
+
+// ── Toast ────────────────────────────────────────────────────────
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast')
+  t.textContent = msg
+  t.className = 'toast show' + (type ? ' ' + type : '')
+  clearTimeout(t._timer)
+  t._timer = setTimeout(() => t.classList.remove('show'), 3500)
+}
+
+// ── Add Repo ─────────────────────────────────────────────────────
+function addRepo() {
+  const list = document.getElementById('repos-list')
+  const card = document.createElement('div')
+  card.className = 'repo-config-card'
+  card.innerHTML = `
+    <button class="remove-btn" onclick="this.closest('.repo-config-card').remove()">×</button>
+    <div class="form-row" style="margin-bottom:10px">
+      <div class="form-group"><label>Repository Name</label><input type="text" placeholder="e.g. repo-name"></div>
+      <div class="form-group"><label>GitLab Project ID</label><input type="number" placeholder="e.g. 104"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Local Path</label><input type="text" placeholder="./repo-name"></div>
+      <div class="form-group"><label>Type</label>
+        <select><option>frontend</option><option>backend</option><option>infra</option><option>fullstack</option></select>
+      </div>
+    </div>
+    <div class="form-group mt-8"><label>Tags</label><input type="text" placeholder="react, nodejs, postgresql"></div>
+  `
+  list.appendChild(card)
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
+// ── Log streaming simulation ──────────────────────────────────────
+let logStream = null
+let autoScroll = true
+let logCount = 20
+const fakeLogLines = [
+  ['DEBUG', 'agent-runner', 'Agent progress: Running tests with pnpm test...'],
+  ['DEBUG', 'agent-runner', 'Agent progress: Tests passed (12 passed, 0 failed)'],
+  ['DEBUG', 'agent-runner', 'Agent progress: STEP 8 — Pushing to remote...'],
+  ['INFO',  'agent-runner', 'Agent run complete <span class="log-kv">turns:<span>24</span> cost:<span>$0.12</span> durationMs:<span>38200</span></span>'],
+  ['INFO',  'state-manager','Issue status updated <span class="log-kv">iid:<span>8</span> status:<span>DONE</span></span>'],
+  ['INFO',  'phase2',       'Issue implementation done <span class="log-kv">iid:<span>8</span></span>'],
+  ['INFO',  'phase2',       'Implementing issue #9 <span class="log-kv">iid:<span>9</span></span>'],
+  ['INFO',  'agent-runner', 'Starting agent run (god mode) <span class="log-kv">cwd:<span>/workspace/repo-backend</span></span>'],
+  ['DEBUG', 'agent-runner', 'Agent progress: Fetching issue #9...'],
+  ['DEBUG', 'agent-runner', 'Agent progress: Creating branch feature/issue-9-email-notifications'],
+]
+let fakeIndex = 0
+
+function now() {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
+}
+
+function startLogStream() {
+  if (logStream) return
+  logStream = setInterval(() => {
+    if (fakeIndex >= fakeLogLines.length) { clearInterval(logStream); logStream = null; return }
+    const [level, mod, msg] = fakeLogLines[fakeIndex++]
+    const body = document.getElementById('log-body')
+    if (!body) return
+    const line = document.createElement('div')
+    line.className = `log-line log-${level}`
+    const shortLevel = level === 'DEBUG' ? 'DBG' : level
+    line.innerHTML = `<span class="log-time">${now()}</span><span class="log-level">${shortLevel}</span><span class="log-module">${mod}</span><span class="log-msg">${msg}</span>`
+    body.appendChild(line)
+    logCount++
+    document.getElementById('log-count').textContent = `${logCount} lines · streaming live`
+    if (autoScroll) body.scrollTop = body.scrollHeight
+  }, 1800)
+}
+
+function toggleAutoscroll() {
+  autoScroll = !autoScroll
+  document.getElementById('autoscroll-btn').textContent = `⬇ Auto-scroll ${autoScroll ? 'ON' : 'OFF'}`
+}
+
+function clearLogs() {
+  const body = document.getElementById('log-body')
+  if (body) { body.innerHTML = ''; logCount = 0 }
+  document.getElementById('log-count').textContent = '0 lines'
+}
+
+function filterLogs() {
+  const q = document.getElementById('log-search').value.toLowerCase()
+  document.querySelectorAll('#log-body .log-line').forEach(line => {
+    line.style.display = line.textContent.toLowerCase().includes(q) ? '' : 'none'
+  })
+}
+
+// Auto-start log stream on load if on logs page
+document.addEventListener('DOMContentLoaded', () => {
+  const logBody = document.getElementById('log-body')
+  if (logBody) logBody.scrollTop = logBody.scrollHeight
+})
+</script>
+</body>
+</html>

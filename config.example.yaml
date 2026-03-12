@@ -1,0 +1,55 @@
+# AI Agent Orchestrator — Configuration
+# Copy to config.yaml and fill in your values
+
+# --- GitLab connection ---
+gitlab:
+  url: "${GITLAB_URL}"
+  token: "${GITLAB_TOKEN}"
+  webhook_secret: "${WEBHOOK_SECRET}"
+
+# --- Repositories to manage ---
+# Supports multiple repos in the same working directory
+repositories:
+  - name: "frontend"
+    gitlab_project_id: 101
+    local_path: "./repo-frontend"   # relative to WORKSPACE_PATH
+    type: "frontend"
+    tags: ["react", "typescript"]
+
+  - name: "backend"
+    gitlab_project_id: 102
+    local_path: "./repo-backend"
+    type: "backend"
+    tags: ["nodejs", "postgresql"]
+
+  - name: "infra"
+    gitlab_project_id: 103
+    local_path: "./repo-infra"
+    type: "infra"
+    tags: ["docker", "k8s"]
+
+# --- Agent settings ---
+agent:
+  model: "claude-sonnet-4-6"
+  max_retries: 3
+  timeout_seconds: 300
+  mockup:
+    enabled: true
+    output_dir: "docs/mockup"
+    framework: "vanilla"   # vanilla | tailwind | bootstrap
+
+# --- Workflow settings ---
+workflow:
+  auto_merge: false
+  require_tests: true
+  target_branch: "main"
+  branch_prefix: "feature/"
+  labels:
+    init: ["phase:init", "ai-generated"]
+    implement: ["phase:implement"]
+    review: ["phase:review"]
+    done: ["phase:done"]
+
+notifications:
+  enabled: true
+  channels: ["gitlab-comment"]

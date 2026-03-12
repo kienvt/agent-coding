@@ -13,9 +13,11 @@
 1. [Tổng quan (Overview)](#1-tổng-quan-overview)
 2. [Kiến trúc hệ thống (System Architecture)](#2-kiến-trúc-hệ-thống-system-architecture)
 3. [Thành phần hệ thống (System Components)](#3-thành-phần-hệ-thống-system-components)
+   - 3.4 [Multi-Repository Manager](#34-multi-repository-manager)
 4. [Workflow tổng thể (End-to-End Workflow)](#4-workflow-tổng-thể-end-to-end-workflow)
 5. [Workflow chi tiết từng phase](#5-workflow-chi-tiết-từng-phase)
    - 5.1 [Phase 1 — Init](#51-phase-1--init)
+     - 5.1.3 [HTML UI Mockup Generation](#513-html-ui-mockup-generation)
    - 5.2 [Phase 2 — Implement](#52-phase-2--implement)
    - 5.3 [Phase 3 — Review](#53-phase-3--review)
    - 5.4 [Phase 4 — Done](#54-phase-4--done)
@@ -26,6 +28,7 @@
 10. [Tech Stack & Dependencies](#10-tech-stack--dependencies)
 11. [Error Handling & Edge Cases](#11-error-handling--edge-cases)
 12. [Security Considerations](#12-security-considerations)
+13. [Docker Deployment](#13-docker-deployment)
 
 ---
 
@@ -41,6 +44,8 @@ Xây dựng một hệ thống **AI Agent** tích hợp với **self-hosted GitL
 - **Tương tác với user** thông qua comments trên GitLab
 - **Tạo merge request** khi hoàn thành và xử lý review feedback
 - **Đóng issues** sau khi merge thành công
+- **Tự động tạo HTML UI Mockup** từ requirement để user review trước khi implement
+- **Quản lý nhiều git repository** trong cùng một thư mục code (monorepo hoặc multi-service)
 
 ### 1.2 Phạm vi
 
@@ -82,10 +87,12 @@ graph TB
         HOOK_SERVER["🌐 Webhook Server"]
         SCHEDULER["⏰ Task Scheduler"]
         STATE_MGR["📊 State Manager"]
-        
+        REPO_MGR["📦 Multi-repo Manager"]
+
         ORCH --> HOOK_SERVER
         ORCH --> SCHEDULER
         ORCH --> STATE_MGR
+        ORCH --> REPO_MGR
     end
 
     subgraph "AI Agent Layer"
@@ -94,11 +101,13 @@ graph TB
         CODER["💻 Coder Module"]
         REVIEWER["🔍 Review Handler"]
         DOC_GEN["📄 Document Generator"]
-        
+        MOCKUP["🎨 Mockup Generator"]
+
         AGENT --> PLANNER
         AGENT --> CODER
         AGENT --> REVIEWER
         AGENT --> DOC_GEN
+        AGENT --> MOCKUP
     end
 
     subgraph "Storage Layer"
@@ -132,6 +141,7 @@ Thành phần trung tâm điều phối toàn bộ quy trình:
 | **Task Scheduler** | Lên lịch và quản lý thứ tự thực thi các tasks |
 | **State Manager** | Theo dõi trạng thái của từng issue, phase hiện tại |
 | **GitLab Client** | Giao tiếp với GitLab API |
+| **Multi-repo Manager** | Quản lý nhiều git repositories, routing tasks đến đúng repo |
 
 ### 3.2 AI Agent (Claude Code)
 
@@ -139,6 +149,7 @@ Thành phần trung tâm điều phối toàn bộ quy trình:
 |--------|---------------|
 | **Planner** | Phân tích requirement → tạo plan, chia nhỏ thành issues |
 | **Document Generator** | Sinh Architecture, DB Schema, API Docs, Test Cases |
+| **Mockup Generator** | Sinh HTML/CSS/JS UI mockup từ requirement để user review |
 | **Coder** | Implement code theo từng issue |
 | **Review Handler** | Xử lý feedback từ user comments, update code/docs |
 
@@ -171,6 +182,48 @@ graph LR
     E --> E1
     F --> F1
 ```
+
+### 3.4 Multi-Repository Manager
+
+Cho phép agent làm việc với **nhiều git repositories** trong cùng một thư mục code, phù hợp với kiến trúc microservices hoặc monorepo có nhiều sub-project.
+
+```mermaid
+graph TB
+    subgraph "Working Directory"
+        ROOT["📁 /workspace"]
+        R1["📁 repo-frontend"]
+        R2["📁 repo-backend"]
+        R3["📁 repo-infra"]
+        ROOT --> R1
+        ROOT --> R2
+        ROOT --> R3
+    end
+
+    subgraph "Multi-repo Manager"
+        DETECT["🔍 Repo Detector"]
+        ROUTER["🔀 Task Router"]
+        SYNC["🔄 Branch Sync"]
+        CTX["📋 Context Switcher"]
+
+        DETECT --> ROUTER
+        ROUTER --> SYNC
+        ROUTER --> CTX
+    end
+
+    DETECT -->|"scan"| ROOT
+    ROUTER -->|"route task"| R1
+    ROUTER -->|"route task"| R2
+    ROUTER -->|"route task"| R3
+```
+
+| Feature | Detail |
+|---------|--------|
+| **Auto-detection** | Tự động phát hiện tất cả git repos trong working directory |
+| **Task Routing** | Phân tích issue → xác định repo nào cần thay đổi |
+| **Cross-repo Issues** | Một issue có thể span nhiều repos (e.g., API + Frontend) |
+| **Branch Isolation** | Mỗi repo có feature branch riêng, đồng bộ cùng naming convention |
+| **Context Switching** | Agent tự động switch context khi làm việc với repo khác |
+| **Multi-MR** | Tạo MR riêng trên từng GitLab project, link lẫn nhau |
 
 ---
 
@@ -261,8 +314,9 @@ flowchart TD
         G3["🔌 Generate API Documentation"]
         G4["🧪 Generate Test Cases"]
         G5["📋 Generate Implementation Plan"]
-        
-        G1 --> G2 --> G3 --> G4 --> G5
+        G6["🎨 Generate HTML UI Mockup"]
+
+        G1 --> G2 --> G3 --> G4 --> G5 --> G6
     end
     
     GEN --> H["Tạo branch: docs/init-plan"]
@@ -305,6 +359,7 @@ flowchart TD
 | **API Documentation** | Endpoints, request/response, authentication | OpenAPI / Markdown |
 | **Test Cases** | Unit tests, integration tests, E2E scenarios | Markdown |
 | **Plan** | Phased implementation, dependencies, timeline | Markdown + Gantt |
+| **HTML UI Mockup** | Interactive HTML prototype với full UI screens, navigation, placeholder data | HTML + CSS + JS |
 
 #### 5.1.2 Issue Structure
 
@@ -331,6 +386,66 @@ Mỗi issue được tạo với cấu trúc:
 ### Labels
 `phase:implement` `priority:high` `component:api`
 ```
+
+#### 5.1.3 HTML UI Mockup Generation
+
+> **Mục tiêu:** Agent tự sinh ra một bộ HTML mockup tương tác để user có thể preview UI trước khi implement, giảm thiểu rework sau này.
+
+```mermaid
+flowchart TD
+    A["📄 Phân tích requirement"] --> B["Xác định các màn hình UI"]
+    B --> C["Thiết kế layout & navigation"]
+
+    C --> SCREENS
+    subgraph SCREENS ["🖥️ Screen Generation"]
+        direction TB
+        S1["Landing / Dashboard screen"]
+        S2["List / Table screens"]
+        S3["Detail / Form screens"]
+        S4["Auth screens (login, register)"]
+        S5["Error / Empty state screens"]
+        S1 --- S2 --- S3 --- S4 --- S5
+    end
+
+    SCREENS --> D["Generate HTML + CSS + JS"]
+    D --> E["Tạo navigation giữa các screens"]
+    E --> F["Commit vào docs/mockup/"]
+    F --> G["Link mockup URL vào issues"]
+    G --> H{User review mockup}
+    H -->|"Cần thay đổi"| I["AI update HTML"]
+    I --> H
+    H -->|"Approve"| J["✅ Mockup confirmed"]
+
+    style SCREENS fill:#0d1117,stroke:#f0883e,color:#c9d1d9
+```
+
+**Cấu trúc output:**
+
+```
+docs/mockup/
+├── index.html          # Navigation hub, danh sách tất cả screens
+├── assets/
+│   ├── style.css       # Global styles, design tokens
+│   └── mock-data.js    # Placeholder JSON data
+├── screens/
+│   ├── dashboard.html
+│   ├── user-list.html
+│   ├── user-detail.html
+│   ├── login.html
+│   └── ...
+└── README.md           # Hướng dẫn mở và review mockup
+```
+
+**Quy tắc generate mockup:**
+
+| Rule | Detail |
+|------|--------|
+| **Self-contained** | Không cần server, mở trực tiếp bằng browser |
+| **Responsive** | Mobile-first, breakpoints cho tablet & desktop |
+| **Placeholder data** | Dùng realistic fake data, không để trống |
+| **Navigation** | Sidebar/navbar liên kết đầy đủ các screens |
+| **Component consistent** | Dùng chung design system (colors, fonts, spacing) |
+| **No external CDN** | Inline styles/scripts để hoạt động offline |
 
 ---
 
@@ -862,19 +977,45 @@ erDiagram
 
 ```yaml
 # config.yaml
-project:
-  name: "project-name"
-  gitlab:
-    url: "https://gitlab.company.com"
-    project_id: 123
-    token: "${GITLAB_ACCESS_TOKEN}"
-    webhook_secret: "${WEBHOOK_SECRET}"
 
+# --- GitLab connection (dùng chung cho tất cả repos) ---
+gitlab:
+  url: "https://gitlab.company.com"
+  token: "${GITLAB_ACCESS_TOKEN}"
+  webhook_secret: "${WEBHOOK_SECRET}"
+
+# --- Danh sách repositories ---
+# Hỗ trợ nhiều repo trong cùng thư mục code
+repositories:
+  - name: "frontend"
+    gitlab_project_id: 101
+    local_path: "./repo-frontend"       # đường dẫn tương đối từ working dir
+    type: "frontend"                    # frontend | backend | infra | fullstack
+    tags: ["react", "typescript"]
+
+  - name: "backend"
+    gitlab_project_id: 102
+    local_path: "./repo-backend"
+    type: "backend"
+    tags: ["nodejs", "postgresql"]
+
+  - name: "infra"
+    gitlab_project_id: 103
+    local_path: "./repo-infra"
+    type: "infra"
+    tags: ["docker", "k8s"]
+
+# --- Agent settings ---
 agent:
-  model: "claude-code"
+  model: "claude-sonnet-4-6"
   max_retries: 3
   timeout_seconds: 300
+  mockup:
+    enabled: true
+    output_dir: "docs/mockup"
+    framework: "vanilla"               # vanilla | tailwind | bootstrap
 
+# --- Workflow settings (áp dụng cho tất cả repos) ---
 workflow:
   auto_merge: false
   require_tests: true
@@ -1034,10 +1175,214 @@ flowchart TD
 
 ---
 
+---
+
+## 13. Docker Deployment
+
+### 13.1 Container Architecture
+
+```mermaid
+graph TB
+    subgraph "Docker Host"
+        subgraph "docker-compose stack"
+            ORCH_C["🎯 orchestrator\n(Node.js + Hono)"]
+            REDIS_C["🗄️ redis\n(event queue)"]
+            AGENT_C["🤖 agent-runner\n(Claude Code)"]
+
+            ORCH_C -->|"enqueue/dequeue"| REDIS_C
+            ORCH_C -->|"spawn task"| AGENT_C
+        end
+
+        VOL_CODE["📁 Volume: /workspace\n(git repos)"]
+        VOL_CFG["⚙️ Volume: /config\n(config.yaml)"]
+        VOL_LOGS["📋 Volume: /logs"]
+
+        AGENT_C <-->|"read/write code"| VOL_CODE
+        ORCH_C <-->|"read config"| VOL_CFG
+        ORCH_C <-->|"write logs"| VOL_LOGS
+    end
+
+    GITLAB["🦊 Self-hosted GitLab"] -->|"webhooks"| ORCH_C
+    ORCH_C -->|"GitLab API"| GITLAB
+```
+
+### 13.2 Dockerfile
+
+```dockerfile
+# Orchestrator Service
+FROM node:22-alpine AS base
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable pnpm && pnpm install --frozen-lockfile
+
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm build
+
+FROM base AS runner
+ENV NODE_ENV=production
+
+# Cài git và claude CLI
+RUN apk add --no-cache git openssh-client
+RUN npm install -g @anthropic-ai/claude-code
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+EXPOSE 3000
+
+CMD ["node", "dist/index.js"]
+```
+
+### 13.3 docker-compose.yml
+
+```yaml
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-agent-orchestrator
+    restart: unless-stopped
+    ports:
+      - "3000:3000"          # Webhook endpoint
+    environment:
+      - NODE_ENV=production
+      - GITLAB_ACCESS_TOKEN=${GITLAB_ACCESS_TOKEN}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - workspace:/workspace         # shared git repos
+      - logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-agent-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agent-net
+
+volumes:
+  workspace:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WORKSPACE_PATH:-./workspace}  # thư mục chứa các git repos
+  redis-data:
+  logs:
+
+networks:
+  agent-net:
+    driver: bridge
+```
+
+### 13.4 Environment Variables
+
+Tạo file `.env` ở root:
+
+```bash
+# .env
+# GitLab
+GITLAB_ACCESS_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
+WEBHOOK_SECRET=your-webhook-secret-here
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
+
+# Workspace — thư mục chứa tất cả git repos
+WORKSPACE_PATH=/path/to/your/repos
+
+# Optional
+PORT=3000
+LOG_LEVEL=info
+```
+
+### 13.5 Khởi chạy
+
+```bash
+# 1. Clone project
+git clone https://gitlab.company.com/ai-agent-coding.git
+cd ai-agent-coding
+
+# 2. Cấu hình
+cp .env.example .env
+# Chỉnh sửa .env với các credentials thực
+nano .env
+
+# 3. Chuẩn bị workspace (chứa các git repos cần làm việc)
+mkdir -p ./workspace
+git clone https://gitlab.company.com/your-project/frontend.git ./workspace/repo-frontend
+git clone https://gitlab.company.com/your-project/backend.git ./workspace/repo-backend
+
+# 4. Cấu hình config.yaml (khai báo repositories)
+cp config.example.yaml config.yaml
+nano config.yaml
+
+# 5. Build & run
+docker compose up -d --build
+
+# 6. Kiểm tra logs
+docker compose logs -f orchestrator
+
+# 7. Đăng ký webhook trên GitLab
+# Trỏ webhook URL đến: http://your-server:3000/webhook
+```
+
+### 13.6 Health Check & Monitoring
+
+```bash
+# Kiểm tra trạng thái containers
+docker compose ps
+
+# Xem logs real-time
+docker compose logs -f
+
+# Restart orchestrator (sau khi update config)
+docker compose restart orchestrator
+
+# Dừng toàn bộ stack
+docker compose down
+
+# Dừng và xóa volumes (reset hoàn toàn)
+docker compose down -v
+```
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /health` | GET | Health check status |
+| `GET /status` | GET | Current workflow state, active issues |
+| `POST /webhook` | POST | GitLab webhook receiver |
+| `POST /trigger` | POST | Manually trigger a workflow phase |
+
+---
+
 > **Next Steps:**
 > 1. Setup project structure theo architecture
 > 2. Implement Orchestrator service với Hono framework
 > 3. Tích hợp Claude Code SDK
 > 4. Implement GitLab API client
 > 5. Setup webhook server
-> 6. Testing end-to-end workflow
+> 6. Implement Multi-repo Manager
+> 7. Implement Mockup Generator
+> 8. Setup Docker deployment
+> 9. Testing end-to-end workflow

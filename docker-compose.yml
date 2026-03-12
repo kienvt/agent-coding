@@ -1,0 +1,59 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-agent-orchestrator
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_BOT_USERNAME=${GITLAB_BOT_USERNAME:-ai-agent}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - WORKSPACE_PATH=/workspace
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # claude-config/ is at /app/claude-config/ — used as fallback when .claude/ not yet deployed
+      - CLAUDE_CONFIG_DIR=/app/claude-config
+    volumes:
+      # Git repositories workspace
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
+      # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
+      - ./claude-config:/workspace/.claude:ro
+      # App config
+      - ./config.yaml:/app/config.yaml:ro
+      - logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-agent-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agent-net
+
+volumes:
+  redis-data:
+  logs:
+
+networks:
+  agent-net:
+    driver: bridge
