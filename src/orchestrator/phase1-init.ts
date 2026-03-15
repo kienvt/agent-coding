@@ -29,9 +29,20 @@ export async function handleRequirementPushed(
   }
 
   const state = await stateManager.getProjectState(event.projectId)
-  if (state && state.phase !== 'IDLE') {
-    log.info({ projectId: event.projectId, phase: state.phase }, 'Skipping — not in IDLE phase')
+
+  // Allow re-plan only from IDLE or AWAITING_REVIEW (before implementation starts)
+  const replanablePhases = ['IDLE', 'AWAITING_REVIEW']
+  if (state && !replanablePhases.includes(state.phase)) {
+    log.info(
+      { projectId: event.projectId, phase: state.phase },
+      'Skipping — implementation already started, cannot re-plan',
+    )
     return
+  }
+
+  if (state?.phase === 'AWAITING_REVIEW') {
+    log.info({ projectId: event.projectId }, 'Requirements updated — re-planning from AWAITING_REVIEW')
+    await stateManager.resetProjectState(event.projectId)
   }
 
   await stateManager.initProjectState(event.projectId, repo.name, event.filePath)

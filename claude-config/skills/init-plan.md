@@ -1,10 +1,10 @@
 # /init-plan — Phase 1: Analyze requirements and initialize project
 
-Read the requirement file, generate planning documents, UI mockups, create GitLab issues, and notify the team for review.
+Read the requirement file(s), generate planning documents, UI mockups, create GitLab issues, and notify the team for review.
 
 ## Context (provided in prompt)
 
-- `requirementFile` — absolute path to the requirement file
+- `requirementFile` — one or more absolute paths, comma-separated. Supported: `.md`, `.txt`, `.pdf`
 - `repoName` — project name
 - `projectId` — GitLab project ID
 
@@ -12,9 +12,15 @@ Read the requirement file, generate planning documents, UI mockups, create GitLa
 
 ### Step 1 — Read & analyze requirements
 
-Read the file at `requirementFile`.
+`requirementFile` may be a single path or a comma-separated list of paths.
+Read **all** files. PDFs are supported — use the Read tool directly on `.pdf` files.
 
-Identify and extract:
+```
+for each path in requirementFile.split(',').map(s => s.trim()):
+  Read the file at that path
+```
+
+Merge all content, then identify and extract:
 - Core features and user stories
 - Data entities and relationships
 - User roles and permissions
@@ -108,7 +114,7 @@ git push -u origin docs/init-plan
 
 Post summary on the first created issue:
 ```bash
-glab issue note {firstIssueIid} --message "## 🤖 Phase 1 Complete
+glab issue note {firstIssueIid} --message "## Phase 1 Complete
 
 Planning documents and UI mockups have been created in \`docs/\`.
 
