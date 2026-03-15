@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { ConfigSchema, type Config } from './schema.js'
@@ -8,6 +8,25 @@ export type { Config } from './schema.js'
 export type { RepositoryConfig } from './schema.js'
 
 let cachedConfig: Config | null = null
+
+const CONFIG_PATH = join(process.cwd(), 'config.yaml')
+
+/**
+ * Bootstrap a minimal config.yaml using env vars for secrets.
+ * Called automatically on first start if no config.yaml exists.
+ * User then configures gitlab.url and repositories via the Web UI.
+ */
+function bootstrapConfigFile(): void {
+  const minimal = {
+    gitlab: {
+      url: process.env['GITLAB_URL'] ?? 'https://gitlab.example.com',
+      token: '${GITLAB_TOKEN}',
+      webhook_secret: '${WEBHOOK_SECRET}',
+    },
+    repositories: [],
+  }
+  writeFileSync(CONFIG_PATH, yaml.dump(minimal, { indent: 2 }), 'utf8')
+}
 
 function interpolateEnvVars(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -35,15 +54,18 @@ function interpolateEnvVars(value: unknown): unknown {
 export async function loadConfig(): Promise<Config> {
   if (cachedConfig) return cachedConfig
 
-  const configPath = join(process.cwd(), 'config.yaml')
+  // Auto-create config.yaml on first start — user configures the rest via Web UI
+  if (!existsSync(CONFIG_PATH)) {
+    bootstrapConfigFile()
+  }
 
   let rawYaml: unknown
   try {
-    const content = readFileSync(configPath, 'utf8')
+    const content = readFileSync(CONFIG_PATH, 'utf8')
     rawYaml = yaml.load(content)
   } catch (err) {
     throw new ConfigError(
-      `Failed to read config.yaml from ${configPath}: ${(err as Error).message}`,
+      `Failed to read config.yaml from ${CONFIG_PATH}: ${(err as Error).message}`,
       'CONFIG_READ_ERROR',
     )
   }
@@ -107,10 +129,9 @@ export function updateConfig(partial: Partial<Config>): void {
   const toWrite = JSON.parse(JSON.stringify(result.data)) as Record<string, unknown>
   const gitlabSection = toWrite['gitlab'] as Record<string, unknown>
   gitlabSection['token'] = '${GITLAB_TOKEN}'
-  gitlabSection['webhook_secret'] = '${GITLAB_WEBHOOK_SECRET}'
+  gitlabSection['webhook_secret'] = '${WEBHOOK_SECRET}'
 
-  const configPath = join(process.cwd(), 'config.yaml')
-  writeFileSync(configPath, yaml.dump(toWrite, { indent: 2 }), 'utf8')
+  writeFileSync(CONFIG_PATH, yaml.dump(toWrite, { indent: 2 }), 'utf8')
 
   cachedConfig = result.data
 }

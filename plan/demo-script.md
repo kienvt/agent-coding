@@ -24,68 +24,18 @@ SSL verification: tắt nếu dùng self-signed cert
 
 ### 3. `.env` thực tế
 
+Chỉ cần 4 secrets — toàn bộ config còn lại được set qua Web UI:
+
 ```env
-GITLAB_URL=https://your-gitlab.com
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
 GITLAB_BOT_USERNAME=ai-agent
 WEBHOOK_SECRET=demo-secret-2026
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
-REDIS_URL=redis://redis:6379
-WORKSPACE_PATH=/workspace
-PORT=3000
-LOG_LEVEL=info
-NODE_ENV=production
 ```
 
-### 4. config.yaml
+> **Lưu ý:** `config.yaml` sẽ được tự động tạo khi khởi động lần đầu. Không cần viết tay.
 
-```yaml
-gitlab:
-  url: "${GITLAB_URL}"
-  token: "${GITLAB_TOKEN}"
-  webhook_secret: "${WEBHOOK_SECRET}"
-
-repositories:
-  - name: "demo-todo-api"
-    gitlab_project_id: {PROJECT_ID}   # ← thay số thực
-    local_path: "./demo-todo-api"
-    type: "backend"
-    tags: ["nodejs", "typescript"]
-
-agent:
-  model: "claude-sonnet-4-6"
-  max_retries: 3
-  timeout_seconds: 300
-  mockup:
-    enabled: true
-    output_dir: "docs/mockup"
-    framework: "vanilla"
-
-workflow:
-  auto_merge: false
-  require_tests: true
-  target_branch: "main"
-  branch_prefix: "feature/"
-  labels:
-    init: ["phase:init", "ai-generated"]
-    implement: ["phase:implement"]
-    review: ["phase:review"]
-    done: ["phase:done"]
-
-notifications:
-  enabled: true
-  channels: ["gitlab-comment"]
-```
-
-### 5. Clone repo vào workspace
-
-```bash
-mkdir -p ./workspace
-cd ./workspace
-git clone https://your-gitlab.com/demo-todo-api.git
-```
-
-### 6. Requirements file chuẩn bị sẵn
+### 4. Requirements file chuẩn bị sẵn
 
 Tạo file `requirement.md` (giữ ở ngoài workspace, copy vào lúc demo):
 
@@ -109,14 +59,26 @@ Xây dựng REST API quản lý công việc (TODO list) với Node.js + TypeScr
 - Không cần authentication
 ```
 
-### 7. Khởi động hệ thống
+### 5. Khởi động hệ thống
 
 ```bash
 docker compose up --build -d
 docker compose logs -f   # kiểm tra không có lỗi
 ```
 
-### 8. Chạy thử một lần tối nay
+### 6. Cấu hình qua Web UI (lần đầu)
+
+Mở `http://localhost:3000` → **Settings**:
+
+1. **GitLab URL** → điền `https://your-gitlab.com` → Save
+2. **Repositories** → Add repository:
+   - Name: `demo-todo-api`
+   - GitLab Project ID: `{PROJECT_ID}` (lấy từ GitLab → Settings → General)
+   - Local Path: `./demo-todo-api`
+   - Type: `backend`
+3. Save → hệ thống **tự động clone repo** vào workspace, sẵn sàng nhận webhook
+
+### 7. Chạy thử một lần tối nay
 
 Push `requirement.md` vào repo, quan sát Phase 1 hoạt động đến bước tạo issues.
 Nếu OK → reset state để sáng demo lại từ đầu:
@@ -298,8 +260,8 @@ Show các tính năng của Web UI:
   Có thể dùng subscription (Claude Max) thay API key.
 
 - *"Có scale lên project lớn được không?"*
-  → Chia requirements thành nhiều file nhỏ, mỗi file một trigger.
-  Hệ thống có thể quản lý nhiều repo song song (xem config.yaml).
+  → Chia requirements thành nhiều file (`.md`, `.txt`, `.pdf`), push cùng lúc.
+  Hệ thống có thể quản lý nhiều repo song song — thêm repo qua Web UI Settings.
 
 - *"Security như thế nào?"*
   → Agent chạy trong Docker container isolated. GitLab token chỉ có quyền
@@ -335,12 +297,14 @@ Kiểm tra GITLAB_TOKEN còn hạn và có đủ quyền (api, write_repository)
 
 ## Checklist trước khi demo
 
-- [ ] `docker compose up` chạy không lỗi
+- [ ] File `.env` có đủ 4 secrets: `GITLAB_TOKEN`, `GITLAB_BOT_USERNAME`, `WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`
+- [ ] `docker compose up --build -d` chạy không lỗi
 - [ ] `curl http://localhost:3000/health` trả `{"status":"ok"}`
 - [ ] Web UI load được tại `http://localhost:3000`
-- [ ] Webhook đã config trên GitLab repo
+- [ ] Đã cấu hình GitLab URL và thêm repository qua Web UI Settings
+- [ ] Webhook đã config trên GitLab repo (URL + secret + triggers)
 - [ ] GitLab token có quyền: `api`, `write_repository`, `read_user`
-- [ ] Workspace `/workspace/demo-todo-api` đã clone
+- [ ] Workspace `/workspace/demo-todo-api` đã được auto-clone sau khi save repo trong UI
 - [ ] File `requirement.md` đã chuẩn bị sẵn
 - [ ] Test push webhook một lần và thấy log trong UI
 - [ ] Reset state sau khi test: `DELETE /api/projects/{ID}/state`

@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import { getConfig, updateConfig } from '../../config/index.js'
 import type { Config } from '../../config/index.js'
+import { ensureAllReposCloned } from '../../utils/repo-setup.js'
 
 function redactConfig(config: Config): unknown {
   return {
@@ -34,6 +35,10 @@ export function registerConfigRoutes(app: Hono): void {
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400)
     }
+
+    // Auto-clone any new repos that don't exist locally yet (fire and forget)
+    const cfg = getConfig()
+    void ensureAllReposCloned(cfg.repositories, cfg.gitlab.url, cfg.gitlab.token)
 
     return c.json({ ok: true, config: redactConfig(getConfig()) })
   })

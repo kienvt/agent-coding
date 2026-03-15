@@ -14,7 +14,7 @@ const ConfigSchema = z.object({
     token: z.string().min(1),
     webhook_secret: z.string().min(1),
   }),
-  repositories: z.array(RepositoryConfigSchema).min(1),
+  repositories: z.array(RepositoryConfigSchema).default([]),
   agent: z.object({
     model: z.string().default('claude-sonnet-4-6'),
     max_retries: z.number().int().min(1).default(3),

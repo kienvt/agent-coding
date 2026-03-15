@@ -5,6 +5,7 @@ import { getRedis } from './queue/redis.js'
 import { app } from './webhook/server.js'
 import { startOrchestrator } from './orchestrator/index.js'
 import { createLogger } from './utils/logger.js'
+import { ensureAllReposCloned } from './utils/repo-setup.js'
 
 const log = createLogger('main')
 
@@ -50,7 +51,13 @@ async function main(): Promise<void> {
   // 4. Setup glab authentication
   await setupGlab()
 
-  // 5. Start orchestrator consumer loop
+  // 5. Clone any repos in config that don't exist locally yet
+  const cfg = await loadConfig()
+  if (cfg.repositories.length > 0) {
+    void ensureAllReposCloned(cfg.repositories, cfg.gitlab.url, cfg.gitlab.token)
+  }
+
+  // 6. Start orchestrator consumer loop
   startOrchestrator().catch((err) => {
     log.fatal({ err }, 'Orchestrator crashed')
     process.exit(1)
