@@ -81,6 +81,23 @@ export class EventQueue {
     const redis = getRedis()
     return redis.llen(QUEUE_KEY)
   }
+
+  async deadLetterLength(): Promise<number> {
+    const redis = getRedis()
+    return redis.llen(DEAD_LETTER_KEY)
+  }
+
+  async deadLetterEntries(limit = 20): Promise<Array<{ event: AgentEvent; reason: string; failedAt: string }>> {
+    const redis = getRedis()
+    const raw = await redis.lrange(DEAD_LETTER_KEY, -limit, -1)
+    return raw.map((r) => JSON.parse(r))
+  }
+
+  async clearDeadLetter(): Promise<void> {
+    const redis = getRedis()
+    await redis.del(DEAD_LETTER_KEY)
+    log.info('Dead-letter queue cleared')
+  }
 }
 
 export const eventQueue = new EventQueue()

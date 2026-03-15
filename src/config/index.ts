@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { ConfigSchema, type Config } from './schema.js'
@@ -79,3 +79,54 @@ export function getConfig(): Config {
   }
   return cachedConfig
 }
+
+// Sensitive keys that must never be written back via API
+const PROTECTED_KEYS = new Set(['gitlab.token', 'gitlab.webhook_secret'])
+
+export function updateConfig(partial: Partial<Config>): void {
+  if (!cachedConfig) throw new ConfigError('Config not loaded', 'CONFIG_NOT_LOADED')
+
+  // Strip sensitive fields from partial
+  const safe = JSON.parse(JSON.stringify(partial)) as Record<string, unknown>
+  if (safe['gitlab']) {
+    const g = safe['gitlab'] as Record<string, unknown>
+    delete g['token']
+    delete g['webhook_secret']
+  }
+
+  // Deep merge into current config
+  const merged = deepMerge(JSON.parse(JSON.stringify(cachedConfig)), safe) as Config
+
+  const result = ConfigSchema.safeParse(merged)
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n')
+    throw new ConfigError(`Config validation failed:\n${issues}`, 'CONFIG_VALIDATION_ERROR')
+  }
+
+  // Write back to config.yaml (restore env var placeholders for secrets)
+  const toWrite = JSON.parse(JSON.stringify(result.data)) as Record<string, unknown>
+  const gitlabSection = toWrite['gitlab'] as Record<string, unknown>
+  gitlabSection['token'] = '${GITLAB_TOKEN}'
+  gitlabSection['webhook_secret'] = '${GITLAB_WEBHOOK_SECRET}'
+
+  const configPath = join(process.cwd(), 'config.yaml')
+  writeFileSync(configPath, yaml.dump(toWrite, { indent: 2 }), 'utf8')
+
+  cachedConfig = result.data
+}
+
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  for (const key of Object.keys(source)) {
+    const sv = source[key]
+    const tv = target[key]
+    if (sv !== null && typeof sv === 'object' && !Array.isArray(sv) &&
+        tv !== null && typeof tv === 'object' && !Array.isArray(tv)) {
+      target[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>)
+    } else {
+      target[key] = sv
+    }
+  }
+  return target
+}
+
+export { PROTECTED_KEYS }

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent Orchestrator</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">
+      <div class="logo-icon">🤖</div>
+      <div>
+        <div>AI Orchestrator</div>
+        <div class="version">v1.0</div>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" data-page="dashboard">
+      <span class="icon">⬡</span> Dashboard
+    </div>
+    <div class="nav-section">Monitor</div>
+    <div class="nav-item" data-page="queue">
+      <span class="icon">⚡</span> Queue
+      <span class="nav-badge" id="queue-badge" style="display:none">0</span>
+    </div>
+    <div class="nav-section">Config</div>
+    <div class="nav-item" data-page="settings">
+      <span class="icon">⚙</span> Settings
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <span class="status-dot green" id="redis-dot"></span>
+    <span id="redis-status">Connecting…</span>
+  </div>
+</nav>
+
+<!-- Main -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-title" id="page-title">Dashboard</span>
+    </div>
+    <div class="topbar-right" id="topbar-actions"></div>
+  </div>
+
+  <div class="content">
+
+    <!-- Dashboard -->
+    <div class="page active" id="page-dashboard">
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Projects</div>
+          <div class="section-sub" id="dash-sub">Loading…</div>
+        </div>
+        <button class="btn btn-default btn-sm" onclick="refreshDashboard()">↻ Refresh</button>
+      </div>
+      <div class="project-grid" id="project-grid">
+        <div class="empty-state"><div class="empty-icon">⏳</div><div>Loading projects…</div></div>
+      </div>
+    </div>
+
+    <!-- Project Detail (logs) -->
+    <div class="page" id="page-project">
+      <div class="section-hd">
+        <div>
+          <div class="section-title" id="proj-name">Project</div>
+          <div class="section-sub" id="proj-sub"></div>
+        </div>
+        <div class="flex-gap" id="proj-actions"></div>
+      </div>
+
+      <!-- Phase timeline -->
+      <div class="card mt-16" id="proj-phases"></div>
+
+      <!-- Issue progress -->
+      <div class="card mt-16" id="proj-issues" style="display:none">
+        <div class="card-title">Issues</div>
+        <div id="proj-issue-list" class="mt-8"></div>
+      </div>
+
+      <!-- Live log terminal -->
+      <div class="mt-16">
+        <div class="section-hd" style="margin-bottom:10px">
+          <span class="section-title" style="font-size:14px">Live Logs</span>
+          <div class="flex-gap">
+            <label class="toggle"><input type="checkbox" id="log-autoscroll" checked>
+              <div class="toggle-track"></div></label>
+            <span class="text-sm">Auto-scroll</span>
+            <button class="btn btn-ghost btn-sm" onclick="clearLogs()">Clear</button>
+          </div>
+        </div>
+        <div class="log-terminal">
+          <div class="log-toolbar">
+            <input type="text" id="log-filter" placeholder="Filter logs…" oninput="filterLogs()">
+            <span class="text-xs" id="log-count">0 lines</span>
+          </div>
+          <div class="log-body" id="log-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Queue -->
+    <div class="page" id="page-queue">
+      <div class="section-hd">
+        <div>
+          <div class="section-title">Event Queue</div>
+          <div class="section-sub" id="queue-sub">Loading…</div>
+        </div>
+        <div class="flex-gap">
+          <button class="btn btn-default btn-sm" onclick="refreshQueue()">↻ Refresh</button>
+          <button class="btn btn-danger btn-sm" onclick="clearDeadLetter()">Clear Dead-letter</button>
+        </div>
+      </div>
+      <div class="grid-2 mt-16">
+        <div class="card">
+          <div class="card-title">Pending</div>
+          <div class="stat-num mt-8" id="q-pending">—</div>
+          <div class="text-xs mt-4">events in queue</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Dead-letter</div>
+          <div class="stat-num mt-8" id="q-dead" style="color:var(--red)">—</div>
+          <div class="text-xs mt-4">failed events</div>
+        </div>
+      </div>
+      <div class="mt-16">
+        <div class="section-title" style="font-size:14px;margin-bottom:10px">Dead-letter entries</div>
+        <div class="table-wrap" id="dead-letter-table">
+          <div class="empty-state" style="padding:30px"><div>No dead-letter entries</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="page" id="page-settings">
+      <div class="section-hd">
+        <div class="section-title">Settings</div>
+        <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save changes</button>
+      </div>
+
+      <div class="card mt-16">
+        <div class="form-section">
+          <div class="form-section-title">🤖 Agent</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Model <span class="label-hint">(Claude model ID)</span></label>
+              <input type="text" id="cfg-model" placeholder="claude-sonnet-4-6">
+            </div>
+            <div class="form-group">
+              <label>Max retries</label>
+              <input type="number" id="cfg-retries" min="1" max="10">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Timeout (seconds)</label>
+              <input type="number" id="cfg-timeout" min="30">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">⚙ Workflow</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Target branch</label>
+              <input type="text" id="cfg-branch" placeholder="main">
+            </div>
+            <div class="form-group">
+              <label>Branch prefix</label>
+              <input type="text" id="cfg-prefix" placeholder="feature/">
+            </div>
+          </div>
+          <div class="form-row full">
+            <div class="form-group">
+              <div class="toggle-wrap">
+                <label class="toggle">
+                  <input type="checkbox" id="cfg-automerge">
+                  <div class="toggle-track"></div>
+                </label>
+                <span class="toggle-label">Auto-merge MR when approved</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-row full">
+            <div class="form-group">
+              <div class="toggle-wrap">
+                <label class="toggle">
+                  <input type="checkbox" id="cfg-tests">
+                  <div class="toggle-track"></div>
+                </label>
+                <span class="toggle-label">Require tests in implementation</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- Trigger modal -->
+<div class="modal-bg" id="trigger-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span style="font-weight:600">Trigger Phase</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:10px">
+      <p class="text-sm" id="trigger-modal-desc"></p>
+      <div class="form-group">
+        <label>Phase</label>
+        <select id="trigger-phase-select">
+          <option value="init">init — Analyze requirements & create docs</option>
+          <option value="implement">implement — Start coding issues</option>
+          <option value="review">review — Create MR</option>
+          <option value="done">done — Cleanup & close</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button class="btn btn-default" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmTrigger()">▶ Trigger</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

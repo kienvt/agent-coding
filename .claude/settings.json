@@ -1,4 +1,3 @@
 {
-  "defaultMode": "bypassPermissions",
-  "skipDangerousModePermissionPrompt": true
+  "defaultMode": "bypassPermissions"
 }

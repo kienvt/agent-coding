@@ -26,9 +26,16 @@ services:
       # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
       # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
       - ./claude-config:/workspace/.claude:ro
-      # App config
-      - ./config.yaml:/app/config.yaml:ro
+      # App config — writable so PUT /api/config can persist changes
+      - ./config.yaml:/app/config.yaml
+      # SQLite database — persistent state, logs, phase history
+      - sqlite-data:/app/data
       - logs:/app/logs
+      # Claude auth: mount host ~/.claude so subscription credentials are reused.
+      # If ANTHROPIC_API_KEY is set above, this mount is unused but harmless.
+      # If using subscription auth (no API key), this is required — run `claude auth login`
+      # on the host first, then the container will reuse the same OAuth credentials.
+      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -52,6 +59,7 @@ services:
 
 volumes:
   redis-data:
+  sqlite-data:
   logs:
 
 networks:

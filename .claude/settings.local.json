@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm approve-builds:*)",
+      "Bash(pnpm build:*)",
+      "Bash(redis-cli ping:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker info:*)",
+      "Bash(docker run:*)",
+      "Bash(docker exec:*)",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill:*)",
+      "Bash(curl -s http://localhost:3000/api/projects)",
+      "Bash(python3 -m json.tool echo \"=== /api/queue ===\")",
+      "Bash(curl -s http://localhost:3000/api/queue)",
+      "Bash(python3 -m json.tool echo \"=== /api/config ===\")",
+      "Bash(curl -s http://localhost:3000/api/config)",
+      "Bash(python3 -m json.tool)",
+      "Bash(/dev/null docker:*)",
+      "Bash(/dev/null echo:*)"
+    ]
+  }
+}

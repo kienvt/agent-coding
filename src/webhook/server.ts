@@ -6,10 +6,24 @@ import { handlePushEvent } from './handlers/push.js'
 import { handleNoteEvent } from './handlers/note.js'
 import { handleMREvent } from './handlers/mr.js'
 import { createLogger } from '../utils/logger.js'
+import { registerProjectRoutes } from '../web/api/projects.js'
+import { registerLogRoutes } from '../web/api/logs.js'
+import { registerQueueRoutes } from '../web/api/queue.js'
+import { registerConfigRoutes } from '../web/api/config.js'
+import { registerStaticRoutes } from '../web/static.js'
 
 const log = createLogger('webhook')
 
 export const app = new Hono()
+
+// API routes (must be before static, so /api/* takes priority)
+registerProjectRoutes(app)
+registerLogRoutes(app)
+registerQueueRoutes(app)
+registerConfigRoutes(app)
+
+// Static files (serves src/web/public/* for the dashboard UI)
+registerStaticRoutes(app)
 
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() })

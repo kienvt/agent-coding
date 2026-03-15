@@ -4,54 +4,11 @@ import { stateManager } from '../state/manager.js'
 import { getConfig } from '../config/index.js'
 import type { RepositoryConfig } from '../config/index.js'
 import type { IssueCommentEvent } from '../queue/types.js'
+import { invokeSkill } from '../utils/skill.js'
 import { createLogger } from '../utils/logger.js'
 import { runPhase3 } from './phase3-review.js'
 
 const log = createLogger('phase2-implement')
-
-function buildImplementPrompt(
-  iid: number,
-  repo: RepositoryConfig,
-  repoAbsPath: string,
-): string {
-  return `Implement GitLab issue #${iid} for project ${repo.name}.
-GitLab project ID: ${repo.gitlab_project_id}
-Working directory: ${repoAbsPath}
-
-STEP 1 — FETCH ISSUE DETAILS:
-  glab issue view ${iid} --output json
-
-STEP 2 — SETUP BRANCH:
-  git fetch origin
-  git checkout -b feature/issue-${iid}-$(glab issue view ${iid} | head -1 | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-' | cut -c1-40) origin/main
-  (Use the issue title to form the branch slug)
-
-STEP 3 — UPDATE ISSUE STATUS:
-  glab issue update ${iid} --label "status:in-progress"
-
-STEP 4 — READ CONTEXT:
-  Read docs/architecture.md and docs/api-documentation.md for architecture guidance.
-  Explore existing codebase structure.
-
-STEP 5 — IMPLEMENT:
-  Write all required code files following existing patterns.
-  Handle errors properly. Follow the acceptance criteria from the issue.
-
-STEP 6 — WRITE TESTS:
-  Write unit tests for new functions in the correct test directory.
-
-STEP 7 — USE /commit skill:
-  Message: "feat: implement #${iid} - {issue title}"
-
-STEP 8 — PUSH:
-  git push -u origin {branch-name}
-
-STEP 9 — UPDATE ISSUE:
-  glab issue update ${iid} --label "status:done"
-  glab issue note ${iid} --message "✅ Implementation complete on branch feature/issue-${iid}-*. All acceptance criteria met."
-
-Always use absolute file paths starting with ${repoAbsPath}.`
-}
 
 export async function startImplementationLoop(projectId: number): Promise<void> {
   const config = getConfig()
@@ -77,12 +34,16 @@ export async function startImplementationLoop(projectId: number): Promise<void> 
     log.info({ projectId, iid: nextIid }, 'Implementing issue')
     await stateManager.updateIssueStatus(projectId, nextIid, 'IN_PROGRESS')
 
-    const prompt = buildImplementPrompt(nextIid, repo, repoAbsPath)
+    const prompt = invokeSkill('implement-issue', {
+      issueIid: nextIid,
+      projectId: repo.gitlab_project_id,
+    })
 
     try {
       await agentRunner.run({
         prompt,
         cwd: repoAbsPath,
+        projectId,
         onProgress: (msg) => log.debug({ msg: msg.slice(0, 120) }, 'Agent progress'),
       })
       await stateManager.updateIssueStatus(projectId, nextIid, 'DONE')
@@ -99,7 +60,7 @@ export async function handleIssueCommentDuringImplementation(
   event: IssueCommentEvent,
 ): Promise<void> {
   const config = getConfig()
-  const repo = config.repositories.find((r) => r.gitlab_project_id === event.projectId)
+  const repo = config.repositories.find((r: RepositoryConfig) => r.gitlab_project_id === event.projectId)
   if (!repo) return
 
   const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
@@ -108,29 +69,26 @@ export async function handleIssueCommentDuringImplementation(
   const bodyLower = event.body.toLowerCase().trim()
   if (bodyLower.includes('approve') || bodyLower.includes('lgtm')) {
     await agentRunner.run({
-      prompt: `User @${event.authorUsername} approved issue #${event.issueIid}. Reply with acknowledgment:
-glab issue note ${event.issueIid} --message "👍 Acknowledged, thank you!"`,
+      prompt: invokeSkill('handle-plan-feedback', {
+        authorUsername: event.authorUsername,
+        issueIid: event.issueIid,
+        feedbackBody: event.body,
+      }),
       cwd: repoAbsPath,
+      projectId: event.projectId,
     })
     return
   }
 
-  const prompt = `User @${event.authorUsername} commented on issue #${event.issueIid}:
-"${event.body}"
-
-GitLab project ID: ${repo.gitlab_project_id}
-Working directory: ${repoAbsPath}
-
-Classify and handle the comment:
-- Bug report → fix the bug on branch feature/issue-${event.issueIid}-*, then push
-- Change request → implement the change, then push
-- Question → answer with: glab issue note ${event.issueIid} --message "{answer}"
-
-If you make code changes, use /commit skill then git push.
-After handling, post a reply comment on the issue.`
+  const prompt = invokeSkill('handle-plan-feedback', {
+    authorUsername: event.authorUsername,
+    issueIid: event.issueIid,
+    feedbackBody: event.body,
+  })
 
   await agentRunner.run({
     prompt,
     cwd: repoAbsPath,
+    projectId: event.projectId,
   })
 }

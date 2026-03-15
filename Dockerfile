@@ -2,6 +2,9 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
+# Native build tools required for better-sqlite3 compilation
+RUN apk add --no-cache python3 make g++
+
 RUN corepack enable pnpm
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
@@ -35,6 +38,8 @@ RUN apk add --no-cache git openssh-client wget ca-certificates \
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+# Copy frontend static files (not compiled by tsup, must be copied separately)
+COPY --from=builder /app/src/web/public ./dist/web/public
 # claude-config/ contains CLAUDE.md + skills + settings.json
 # mounted as /workspace/.claude via docker-compose volume; also bundled here as fallback
 COPY --from=builder /app/claude-config ./claude-config

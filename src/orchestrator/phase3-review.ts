@@ -4,6 +4,7 @@ import { stateManager } from '../state/manager.js'
 import { getConfig } from '../config/index.js'
 import type { RepositoryConfig } from '../config/index.js'
 import type { MRReviewEvent } from '../queue/types.js'
+import { invokeSkill } from '../utils/skill.js'
 import { createLogger } from '../utils/logger.js'
 import { runPhase4 } from './phase4-done.js'
 
@@ -17,7 +18,7 @@ function parseMrIid(output: string): number | null {
 
 export async function runPhase3(projectId: number): Promise<void> {
   const config = getConfig()
-  const repo = config.repositories.find((r) => r.gitlab_project_id === projectId)
+  const repo = config.repositories.find((r: RepositoryConfig) => r.gitlab_project_id === projectId)
   if (!repo) {
     log.warn({ projectId }, 'No repo config found')
     return
@@ -31,41 +32,18 @@ export async function runPhase3(projectId: number): Promise<void> {
   const state = await stateManager.getProjectState(projectId)
   const iids = state?.issueIids ?? []
 
-  const prompt = `All issues have been implemented for project ${repo.name}.
-GitLab project ID: ${repo.gitlab_project_id}
-Working directory: ${repoAbsPath}
-Implemented issues: ${iids.join(', ')}
-
-USE /create-mr skill to create the Merge Request.
-
-STEP 1 — GET ISSUE LIST:
-  glab issue list --label "phase:implement,status:done" --output json
-  Extract: IIDs and titles
-
-STEP 2 — USE /create-mr skill:
-  Source branch: feature branches (consolidate if multiple)
-  Target branch: main
-  Include "Closes #N" for each issue
-
-  If multiple feature branches exist:
-    git fetch origin
-    git checkout -b feature/sprint-$(date +%Y%m%d) main
-    git merge feature/issue-* --no-edit (for each branch)
-    git push -u origin feature/sprint-$(date +%Y%m%d)
-
-STEP 3 — OUTPUT MR IID on its own line:
-  MR_IID: {number}
-
-STEP 4 — NOTIFY USER:
-  glab mr note {mrIid} --message "🤖 All ${iids.length} issues implemented. MR ready for review!"
-
-Always use absolute paths starting with ${repoAbsPath}.`
+  const prompt = invokeSkill('create-mr', {
+    issueIids: iids.join(','),
+    projectId: repo.gitlab_project_id,
+    repoName: repo.name,
+  })
 
   log.info({ projectId }, 'Starting Phase 3 — creating MR')
 
   const result = await agentRunner.run({
     prompt,
     cwd: repoAbsPath,
+    projectId,
     onProgress: (msg) => log.debug({ msg: msg.slice(0, 120) }, 'Agent progress'),
   })
 
@@ -82,14 +60,11 @@ Always use absolute paths starting with ${repoAbsPath}.`
 
 export async function handleMRReviewEvent(event: MRReviewEvent): Promise<void> {
   const config = getConfig()
-  const repo = config.repositories.find((r) => r.gitlab_project_id === event.projectId)
+  const repo = config.repositories.find((r: RepositoryConfig) => r.gitlab_project_id === event.projectId)
   if (!repo) return
 
   const state = await stateManager.getProjectState(event.projectId)
   if (!state) return
-
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
-  const repoAbsPath = path.resolve(workspacePath, repo.local_path)
 
   if (event.action === 'approved') {
     log.info({ projectId: event.projectId, mrIid: event.mrIid }, 'MR approved — triggering Phase 4')
@@ -99,23 +74,17 @@ export async function handleMRReviewEvent(event: MRReviewEvent): Promise<void> {
   }
 
   if (event.action === 'changes_requested' || event.action === 'commented') {
-    const prompt = `The user requested changes on MR !${event.mrIid} for project ${repo.name}.
-GitLab project ID: ${repo.gitlab_project_id}
-Working directory: ${repoAbsPath}
+    const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+    const repoAbsPath = path.resolve(workspacePath, repo.local_path)
 
-USE /review-comments skill:
-  MR IID: ${event.mrIid}
-
-After addressing all review comments:
-  - Use /commit skill: "fix: address review comments on !${event.mrIid}"
-  - git push origin {sourceBranch}
-  - Update MR: glab mr note ${event.mrIid} --message "All review comments addressed. Ready for re-review."
-
-Always use absolute paths starting with ${repoAbsPath}.`
+    const prompt = invokeSkill('handle-review-changes', {
+      mrIid: event.mrIid,
+    })
 
     await agentRunner.run({
       prompt,
       cwd: repoAbsPath,
+      projectId: event.projectId,
     })
   }
 }

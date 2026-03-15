@@ -13,7 +13,7 @@ Extract IIDs and titles.
 2. **Consolidate branches** (if multiple feature branches):
 ```bash
 git fetch origin
-git checkout -b feature/sprint-$(date +%Y%m%d) main
+git checkout -b feature/sprint-$(date +%Y%m%d) origin/main
 # For each issue branch:
 git merge feature/issue-{iid}-{slug} --no-edit
 # If conflict: resolve, then git add -A && git commit
