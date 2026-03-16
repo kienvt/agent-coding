@@ -24,16 +24,18 @@ SSL verification: tắt nếu dùng self-signed cert
 
 ### 3. `.env` thực tế
 
-Chỉ cần 4 secrets — toàn bộ config còn lại được set qua Web UI:
+Chỉ cần 3 secrets bắt buộc — toàn bộ config còn lại được set qua Web UI:
 
 ```env
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
 GITLAB_BOT_USERNAME=ai-agent
 WEBHOOK_SECRET=demo-secret-2026
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
 ```
 
-> **Lưu ý:** `config.yaml` sẽ được tự động tạo khi khởi động lần đầu. Không cần viết tay.
+> **Claude auth:** Dùng subscription → chạy `claude auth login` trên host một lần, credentials tự mount vào container.
+> Dùng API key → thêm `ANTHROPIC_API_KEY=sk-ant-...` vào `.env`.
+>
+> **`config.yaml`** tự động tạo khi khởi động lần đầu. Không cần viết tay.
 
 ### 4. Requirements file chuẩn bị sẵn
 
@@ -297,7 +299,7 @@ Kiểm tra GITLAB_TOKEN còn hạn và có đủ quyền (api, write_repository)
 
 ## Checklist trước khi demo
 
-- [ ] File `.env` có đủ 4 secrets: `GITLAB_TOKEN`, `GITLAB_BOT_USERNAME`, `WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`
+- [ ] File `.env` có 3 secrets: `GITLAB_TOKEN`, `GITLAB_BOT_USERNAME`, `WEBHOOK_SECRET`
 - [ ] `docker compose up --build -d` chạy không lỗi
 - [ ] `curl http://localhost:3000/health` trả `{"status":"ok"}`
 - [ ] Web UI load được tại `http://localhost:3000`

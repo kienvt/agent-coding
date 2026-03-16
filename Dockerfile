@@ -24,14 +24,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Install git, openssh, and glab CLI
-ARG GLAB_VERSION=1.48.0
-RUN apk add --no-cache git openssh-client wget ca-certificates \
-  && wget -qO /tmp/glab.tar.gz \
-       "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_Linux_x86_64.tar.gz" \
-  && tar -xzf /tmp/glab.tar.gz -C /usr/local/bin glab \
-  && rm /tmp/glab.tar.gz \
-  && chmod +x /usr/local/bin/glab \
+# Install git, openssh, and glab CLI (glab is in Alpine community repo)
+RUN apk add --no-cache git openssh-client glab \
   && glab version
 
 # Copy built app
