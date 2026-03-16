@@ -50,7 +50,7 @@ async function renderDashboard() {
     const projects = await api.get('/api/projects')
     sub.textContent = `${projects.length} project(s) configured`
     if (!projects.length) {
-      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><div>No projects configured</div></div>`
+      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><div>No projects yet — go to <a href="#" onclick="navigate('settings');return false">Settings</a> to add a repository</div></div>`
       return
     }
     grid.innerHTML = projects.map(p => projectCard(p)).join('')

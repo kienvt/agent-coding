@@ -58,7 +58,10 @@
           <div class="section-title">Projects</div>
           <div class="section-sub" id="dash-sub">Loading…</div>
         </div>
-        <button class="btn btn-default btn-sm" onclick="refreshDashboard()">↻ Refresh</button>
+        <div class="flex-gap">
+          <button class="btn btn-default btn-sm" onclick="refreshDashboard()">↻ Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="navigate('settings')">+ Add Project</button>
+        </div>
       </div>
       <div class="project-grid" id="project-grid">
         <div class="empty-state"><div class="empty-icon">⏳</div><div>Loading projects…</div></div>
