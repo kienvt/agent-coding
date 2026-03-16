@@ -392,11 +392,59 @@ async function saveSettings() {
   }
 }
 
+// ── Add Project modal ─────────────────────────────────────────────
+function openAddProjectModal() {
+  document.getElementById('ap-name').value = ''
+  document.getElementById('ap-id').value   = ''
+  document.getElementById('ap-path').value = ''
+  document.getElementById('ap-type').value = 'backend'
+  document.getElementById('add-project-modal').classList.add('open')
+}
+
+function closeAddProjectModal() {
+  document.getElementById('add-project-modal').classList.remove('open')
+}
+
+async function confirmAddProject() {
+  const name = document.getElementById('ap-name').value.trim()
+  const id   = parseInt(document.getElementById('ap-id').value, 10)
+  const path = document.getElementById('ap-path').value.trim()
+  const type = document.getElementById('ap-type').value
+  if (!name || !id || !path) { toast('Fill in all fields', 'error'); return }
+
+  // Load current repos first to avoid overwriting them
+  let repos = []
+  try {
+    const cfg = await api.get('/api/config')
+    repos = cfg.repositories ?? []
+  } catch (e) {
+    toast(`Failed to load config: ${e.message}`, 'error'); return
+  }
+
+  repos = [...repos, { name, gitlab_project_id: id, local_path: path, type, tags: [] }]
+  try {
+    await api.put('/api/config', { repositories: repos })
+    toast(`Project "${name}" added — cloning in background…`, 'success')
+    closeAddProjectModal()
+    renderDashboard()
+  } catch (e) {
+    toast(`Failed: ${e.message}`, 'error')
+  }
+}
+
 // ── Trigger modal ────────────────────────────────────────────────
 function openTriggerModal(projectId, name) {
   triggerTarget = projectId
   document.getElementById('trigger-modal-desc').textContent = `Project: ${name}`
+  document.getElementById('trigger-phase-select').value = 'init'
+  document.getElementById('trigger-filepath').value = ''
+  onTriggerPhaseChange()
   document.getElementById('trigger-modal').classList.add('open')
+}
+
+function onTriggerPhaseChange() {
+  const phase = document.getElementById('trigger-phase-select').value
+  document.getElementById('trigger-filepath-group').style.display = phase === 'init' ? '' : 'none'
 }
 
 function closeModal() {
@@ -407,8 +455,14 @@ function closeModal() {
 async function confirmTrigger() {
   if (!triggerTarget) return
   const phase = document.getElementById('trigger-phase-select').value
+  const body = { phase }
+  if (phase === 'init') {
+    const filePath = document.getElementById('trigger-filepath').value.trim()
+    if (!filePath) { toast('Requirements file path is required', 'error'); return }
+    body.filePath = filePath
+  }
   try {
-    await api.post(`/api/projects/${triggerTarget}/trigger`, { phase })
+    await api.post(`/api/projects/${triggerTarget}/trigger`, body)
     toast(`Triggered phase: ${phase}`, 'success')
     closeModal()
     if (currentPage === 'dashboard') renderDashboard()
@@ -479,6 +533,10 @@ document.querySelectorAll('.nav-item[data-page]').forEach(el => {
 
 document.getElementById('trigger-modal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeModal()
+})
+
+document.getElementById('add-project-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeAddProjectModal()
 })
 
 checkHealth()

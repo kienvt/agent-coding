@@ -64,20 +64,39 @@ export function registerProjectRoutes(app: Hono): void {
     })
   })
 
-  // POST /api/projects/:id/trigger — enqueue TRIGGER_PHASE
+  // POST /api/projects/:id/trigger — enqueue event based on phase
   app.post('/api/projects/:id/trigger', async (c) => {
     const projectId = parseInt(c.req.param('id'), 10)
     if (isNaN(projectId)) return c.json({ error: 'Invalid project id' }, 400)
 
-    let body: { phase: string }
+    let body: { phase: string; filePath?: string }
     try {
-      body = (await c.req.json()) as { phase: string }
+      body = (await c.req.json()) as { phase: string; filePath?: string }
     } catch {
       return c.json({ error: 'Invalid JSON' }, 400)
     }
 
     if (!VALID_TRIGGER_PHASES.includes(body.phase as TriggerPhase)) {
       return c.json({ error: `phase must be one of: ${VALID_TRIGGER_PHASES.join(', ')}` }, 400)
+    }
+
+    // init phase: enqueue REQUIREMENT_PUSHED so the actual AI agent runs Phase 1
+    if (body.phase === 'init') {
+      if (!body.filePath?.trim()) {
+        return c.json({ error: 'filePath is required for init phase' }, 400)
+      }
+      const config = getConfig()
+      const repo = config.repositories.find((r) => r.gitlab_project_id === projectId)
+      if (!repo) return c.json({ error: 'Project not found' }, 404)
+
+      const eventId = await eventQueue.enqueue({
+        type: 'REQUIREMENT_PUSHED',
+        projectId,
+        commitSha: 'manual',
+        filePath: body.filePath.trim(),
+        repositoryName: repo.name,
+      })
+      return c.json({ ok: true, eventId })
     }
 
     const eventId = await eventQueue.enqueue({
