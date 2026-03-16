@@ -181,7 +181,7 @@ Vào **Settings**:
 Trong GitLab repo → Settings → Webhooks → Add new webhook:
 
 ```
-URL:     http://your-server-ip:3000/webhook/gitlab
+URL:     http://your-server-ip:3000/webhook
 Secret:  (giá trị WEBHOOK_SECRET trong .env)
 Triggers: ✅ Push events  ✅ Comments  ✅ Merge request events
 ```

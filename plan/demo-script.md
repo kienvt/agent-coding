@@ -16,7 +16,7 @@ Lấy **Project ID** (hiển thị trong Settings → General).
 Trong GitLab repo → Settings → Webhooks:
 
 ```
-URL:     http://{server-ip}:3000/webhook/gitlab
+URL:     http://{server-ip}:3000/webhook
 Secret:  (giá trị WEBHOOK_SECRET trong .env)
 Triggers: ✅ Push events  ✅ Comments  ✅ Merge request events
 SSL verification: tắt nếu dùng self-signed cert

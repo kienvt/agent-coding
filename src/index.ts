@@ -18,12 +18,15 @@ async function setupGlab(): Promise<void> {
     return
   }
 
+  // glab expects hostname only, not full URL (e.g. "git.bssd.vn" not "https://git.bssd.vn")
+  const hostname = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+
   try {
     execSync(
-      `echo "${token}" | glab auth login --hostname "${url}" --stdin --git-protocol https`,
+      `echo "${token}" | glab auth login --hostname "${hostname}" --stdin --git-protocol https`,
       { stdio: 'pipe' },
     )
-    execSync(`glab config set host "${url}"`, { stdio: 'pipe' })
+    execSync(`glab config set --global host "${hostname}"`, { stdio: 'pipe' })
     const status = execSync('glab auth status', { stdio: 'pipe' }).toString()
     log.info({ status: status.trim() }, 'glab authenticated')
   } catch (err) {
