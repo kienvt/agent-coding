@@ -26,9 +26,7 @@ services:
       # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
       # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
       - ./claude-config:/workspace/.claude:ro
-      # App config — writable so PUT /api/config can persist changes
-      - ./config.yaml:/app/config.yaml
-      # SQLite database — persistent state, logs, phase history
+      # SQLite database + config.yaml — all persistent data in one named volume
       - sqlite-data:/app/data
       - logs:/app/logs
       # Claude auth: mount host ~/.claude so subscription credentials are reused.

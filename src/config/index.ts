@@ -9,7 +9,9 @@ export type { RepositoryConfig } from './schema.js'
 
 let cachedConfig: Config | null = null
 
-const CONFIG_PATH = join(process.cwd(), 'config.yaml')
+// Store config in /app/data/ (named volume) so it persists without a bind mount file
+const DATA_DIR = process.env['DATA_DIR'] ?? join(process.cwd(), 'data')
+const CONFIG_PATH = join(DATA_DIR, 'config.yaml')
 
 /**
  * Bootstrap a minimal config.yaml using env vars for secrets.

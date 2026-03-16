@@ -26,7 +26,6 @@ async function setupGlab(): Promise<void> {
       `echo "${token}" | glab auth login --hostname "${hostname}" --stdin --git-protocol https`,
       { stdio: 'pipe' },
     )
-    execSync(`glab config set --global host "${hostname}"`, { stdio: 'pipe' })
     const status = execSync('glab auth status', { stdio: 'pipe' }).toString()
     log.info({ status: status.trim() }, 'glab authenticated')
   } catch (err) {
