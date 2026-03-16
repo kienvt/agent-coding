@@ -26,6 +26,8 @@ services:
       # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
       # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
       - ./claude-config:/workspace/.claude:ro
+      # Static UI files — mount from host so changes take effect without rebuild
+      - ./src/web/public:/app/dist/web/public:ro
       # SQLite database + config.yaml — all persistent data in one named volume
       - sqlite-data:/app/data
       - logs:/app/logs
