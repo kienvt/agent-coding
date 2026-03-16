@@ -298,23 +298,80 @@ async function clearDeadLetter() {
 }
 
 // ── Settings ─────────────────────────────────────────────────────
+let _cfgRepos = []  // local copy of repositories array
+
 async function renderSettings() {
   try {
     const cfg = await api.get('/api/config')
-    document.getElementById('cfg-model').value    = cfg.agent?.model ?? ''
-    document.getElementById('cfg-retries').value  = cfg.agent?.max_retries ?? 3
-    document.getElementById('cfg-timeout').value  = cfg.agent?.timeout_seconds ?? 300
-    document.getElementById('cfg-branch').value   = cfg.workflow?.target_branch ?? 'main'
-    document.getElementById('cfg-prefix').value   = cfg.workflow?.branch_prefix ?? 'feature/'
+    document.getElementById('cfg-gitlab-url').value  = cfg.gitlab?.url ?? ''
+    document.getElementById('cfg-model').value       = cfg.agent?.model ?? ''
+    document.getElementById('cfg-retries').value     = cfg.agent?.max_retries ?? 3
+    document.getElementById('cfg-timeout').value     = cfg.agent?.timeout_seconds ?? 300
+    document.getElementById('cfg-branch').value      = cfg.workflow?.target_branch ?? 'main'
+    document.getElementById('cfg-prefix').value      = cfg.workflow?.branch_prefix ?? 'feature/'
     document.getElementById('cfg-automerge').checked = cfg.workflow?.auto_merge ?? false
     document.getElementById('cfg-tests').checked     = cfg.workflow?.require_tests ?? true
+    _cfgRepos = cfg.repositories ?? []
+    renderRepoList()
   } catch (e) {
     toast(`Failed to load config: ${e.message}`, 'error')
   }
 }
 
+function renderRepoList() {
+  const el = document.getElementById('repo-list')
+  if (!_cfgRepos.length) {
+    el.innerHTML = `<div class="text-xs" style="color:var(--text-muted)">No repositories configured.</div>`
+    return
+  }
+  el.innerHTML = _cfgRepos.map((r, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1">
+        <span style="font-weight:500">${escHtml(r.name)}</span>
+        <span class="tag ${r.type}" style="margin-left:6px">${r.type}</span>
+        <div class="text-xs" style="margin-top:2px;color:var(--text-muted)">${escHtml(r.local_path)} · ID: ${r.gitlab_project_id}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deleteRepository(${i})">Remove</button>
+    </div>`).join('')
+}
+
+async function addRepository() {
+  const name = document.getElementById('new-repo-name').value.trim()
+  const id   = parseInt(document.getElementById('new-repo-id').value, 10)
+  const path = document.getElementById('new-repo-path').value.trim()
+  const type = document.getElementById('new-repo-type').value
+  if (!name || !id || !path) { toast('Fill in all fields', 'error'); return }
+  _cfgRepos = [..._cfgRepos, { name, gitlab_project_id: id, local_path: path, type, tags: [] }]
+  try {
+    await api.put('/api/config', { repositories: _cfgRepos })
+    toast(`Repository "${name}" added — cloning in background…`, 'success')
+    document.getElementById('new-repo-name').value = ''
+    document.getElementById('new-repo-id').value   = ''
+    document.getElementById('new-repo-path').value = ''
+    renderRepoList()
+  } catch (e) {
+    _cfgRepos = _cfgRepos.slice(0, -1)
+    toast(`Failed: ${e.message}`, 'error')
+  }
+}
+
+async function deleteRepository(idx) {
+  const repo = _cfgRepos[idx]
+  if (!confirm(`Remove "${repo.name}" from config? Local files are not deleted.`)) return
+  _cfgRepos = _cfgRepos.filter((_, i) => i !== idx)
+  try {
+    await api.put('/api/config', { repositories: _cfgRepos })
+    toast('Repository removed', 'success')
+    renderRepoList()
+  } catch (e) {
+    toast(`Failed: ${e.message}`, 'error')
+  }
+}
+
 async function saveSettings() {
+  const gitlabUrl = document.getElementById('cfg-gitlab-url').value.trim()
   const partial = {
+    ...(gitlabUrl ? { gitlab: { url: gitlabUrl } } : {}),
     agent: {
       model:           document.getElementById('cfg-model').value,
       max_retries:     parseInt(document.getElementById('cfg-retries').value, 10),

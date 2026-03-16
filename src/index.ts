@@ -26,7 +26,8 @@ async function setupGlab(): Promise<void> {
       `echo "${token}" | glab auth login --hostname "${hostname}" --stdin --git-protocol https`,
       { stdio: 'pipe' },
     )
-    const status = execSync('glab auth status', { stdio: 'pipe' }).toString()
+    // Check only the specific hostname to avoid failures from stale entries (e.g. gitlab.com)
+    const status = execSync(`glab auth status --hostname "${hostname}" 2>&1 || true`, { stdio: 'pipe' }).toString()
     log.info({ status: status.trim() }, 'glab authenticated')
   } catch (err) {
     log.warn({ err }, 'glab auth setup failed — agent may not be able to use GitLab CLI')
