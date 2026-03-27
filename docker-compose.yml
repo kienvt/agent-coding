@@ -6,7 +6,7 @@ services:
     container_name: ai-agent-orchestrator
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
       - GITLAB_TOKEN=${GITLAB_TOKEN:-}
@@ -22,7 +22,8 @@ services:
       # Public URL for auto-registering GitLab webhooks (e.g. https://agent.example.com)
       - PUBLIC_URL=${PUBLIC_URL:-}
       # claude-config/ is at /app/claude-config/ — used as fallback when .claude/ not yet deployed
-      - CLAUDE_CONFIG_DIR=/app/claude-config
+      # NOTE: must NOT use CLAUDE_CONFIG_DIR here — that env var is reserved by Claude Code for auth
+      - AGENT_CLAUDE_CONFIG_DIR=/app/claude-config
     volumes:
       # Git repositories workspace — set WORKSPACE_PATH in .env to override
       - ${WORKSPACE_PATH:-./workspace}:/workspace

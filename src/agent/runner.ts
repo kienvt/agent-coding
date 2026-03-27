@@ -9,7 +9,9 @@ import { logStore } from '../utils/log-store.js'
 const log = createLogger('agent-runner')
 
 // claude-config/ directory at project root (process.cwd() = /app in Docker, project root in dev)
-const CLAUDE_CONFIG_DIR = process.env['CLAUDE_CONFIG_DIR'] ?? join(process.cwd(), 'claude-config')
+// Use AGENT_CLAUDE_CONFIG_DIR to avoid conflicting with Claude Code's own CLAUDE_CONFIG_DIR
+// (which Claude Code uses to locate auth credentials — overriding it breaks subscription auth)
+const CLAUDE_CONFIG_DIR = process.env['AGENT_CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(process.cwd(), 'claude-config')
 
 export interface AgentRunOptions {
   prompt: string
