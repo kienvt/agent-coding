@@ -36,7 +36,7 @@ services:
       # If ANTHROPIC_API_KEY is set above, this mount is unused but harmless.
       # If using subscription auth (no API key), this is required — run `claude auth login`
       # on the host first, then the container will reuse the same OAuth credentials.
-      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude:ro
+      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude
     depends_on:
       redis:
         condition: service_healthy
