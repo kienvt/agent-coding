@@ -18,12 +18,13 @@ const PROCESSING_PREFIX = 'agent:processing:'
 const PROCESSING_TTL_SECONDS = 3600 // 1 hour
 
 // Explicitly typed union without id/timestamp for each event type
+// (TypeScript cannot distribute Omit over unions, so we enumerate manually)
 export type EnqueueInput =
-  | Omit<RequirementPushedEvent, 'id' | 'timestamp'>
-  | Omit<IssueCommentEvent, 'id' | 'timestamp'>
-  | Omit<MRReviewEvent, 'id' | 'timestamp'>
-  | Omit<MRMergedEvent, 'id' | 'timestamp'>
-  | Omit<TriggerPhaseEvent, 'id' | 'timestamp'>
+  | (Omit<RequirementPushedEvent, 'id' | 'timestamp'> & { type: 'REQUIREMENT_PUSHED' })
+  | (Omit<IssueCommentEvent, 'id' | 'timestamp'> & { type: 'ISSUE_COMMENT' })
+  | (Omit<MRReviewEvent, 'id' | 'timestamp'> & { type: 'MR_REVIEW' })
+  | (Omit<MRMergedEvent, 'id' | 'timestamp'> & { type: 'MR_MERGED' })
+  | (Omit<TriggerPhaseEvent, 'id' | 'timestamp'> & { type: 'TRIGGER_PHASE' })
 
 export class EventQueue {
   async enqueue(event: EnqueueInput): Promise<string> {

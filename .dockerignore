@@ -1,0 +1,39 @@
+# Dependencies
+node_modules
+src/web/client/node_modules
+
+# Build outputs (rebuilt inside Docker)
+dist
+public-dist
+src/web/client/dist
+
+# Git
+.git
+.gitignore
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Runtime data — not needed in image
+workspace
+data
+
+# Dev tools
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test / coverage
+coverage
+.nyc_output
+
+# macOS
+.DS_Store

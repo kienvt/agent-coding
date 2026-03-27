@@ -1,4 +1,6 @@
 import { eventQueue } from '../../queue/event-queue.js'
+import { getConfig } from '../../config/index.js'
+import { resolveGitlabProject } from '../resolve.js'
 import { createLogger } from '../../utils/logger.js'
 
 const log = createLogger('webhook:mr')
@@ -22,34 +24,46 @@ export async function handleMREvent(payload: MRPayload): Promise<void> {
     return
   }
 
-  const projectId = payload.project.id
+  const config = getConfig()
+  const resolved = resolveGitlabProject(payload.project.id, config)
+
+  if (!resolved) {
+    log.debug({ gitlabProjectId: payload.project.id }, 'MR: project not configured, ignoring')
+    return
+  }
+
+  const { projectSlug } = resolved
+  const gitlabProjectId = payload.project.id
   const { iid: mrIid, action } = payload.object_attributes
 
   if (action === 'merge') {
     await eventQueue.enqueue({
       type: 'MR_MERGED',
-      projectId,
+      projectSlug,
+      gitlabProjectId,
       mrIid,
       mergedBy: payload.user.username,
     })
-    log.info({ projectId, mrIid }, 'MR_MERGED enqueued')
+    log.info({ projectSlug, mrIid }, 'MR_MERGED enqueued')
   } else if (action === 'approved') {
     await eventQueue.enqueue({
       type: 'MR_REVIEW',
-      projectId,
+      projectSlug,
+      gitlabProjectId,
       mrIid,
       action: 'approved',
       authorUsername: payload.user.username,
     })
-    log.info({ projectId, mrIid }, 'MR_REVIEW (approved) enqueued')
+    log.info({ projectSlug, mrIid }, 'MR_REVIEW (approved) enqueued')
   } else if (action === 'changes_requested') {
     await eventQueue.enqueue({
       type: 'MR_REVIEW',
-      projectId,
+      projectSlug,
+      gitlabProjectId,
       mrIid,
       action: 'changes_requested',
       authorUsername: payload.user.username,
     })
-    log.info({ projectId, mrIid }, 'MR_REVIEW (changes_requested) enqueued')
+    log.info({ projectSlug, mrIid }, 'MR_REVIEW (changes_requested) enqueued')
   }
 }

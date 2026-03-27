@@ -9,25 +9,24 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - GITLAB_TOKEN=${GITLAB_TOKEN}
-      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_TOKEN=${GITLAB_TOKEN:-}
+      - GITLAB_URL=${GITLAB_URL:-}
       - GITLAB_BOT_USERNAME=${GITLAB_BOT_USERNAME:-ai-agent}
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - REDIS_URL=redis://redis:6379
       - WORKSPACE_PATH=/workspace
+      - DATA_DIR=/app/data
       - PORT=3000
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # claude-config/ is at /app/claude-config/ — used as fallback when .claude/ not yet deployed
       - CLAUDE_CONFIG_DIR=/app/claude-config
     volumes:
-      # Git repositories workspace
+      # Git repositories workspace — set WORKSPACE_PATH in .env to override
       - ${WORKSPACE_PATH:-./workspace}:/workspace
       # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
       # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
       - ./claude-config:/workspace/.claude:ro
-      # Static UI files — mount from host so changes take effect without rebuild
-      - ./src/web/public:/app/dist/web/public:ro
       # SQLite database + config.yaml — all persistent data in one named volume
       - sqlite-data:/app/data
       - logs:/app/logs

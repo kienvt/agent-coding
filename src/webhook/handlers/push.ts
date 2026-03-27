@@ -1,10 +1,13 @@
 import { eventQueue } from '../../queue/event-queue.js'
+import { getConfig } from '../../config/index.js'
+import { resolveGitlabProject } from '../resolve.js'
 import { createLogger } from '../../utils/logger.js'
 
 const log = createLogger('webhook:push')
 
 interface PushPayload {
   object_kind: 'push'
+  ref: string
   project: { id: number; name: string }
   commits: Array<{
     id: string
@@ -13,19 +16,42 @@ interface PushPayload {
   }>
 }
 
-const REQUIREMENT_PATTERN = /requirement/i
-const SUPPORTED_EXTENSIONS = ['.md', '.txt', '.pdf']
-
-function isRequirementFile(filePath: string): boolean {
-  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
-  return REQUIREMENT_PATTERN.test(filePath) && SUPPORTED_EXTENSIONS.includes(ext)
+function matchesPattern(filePath: string, pattern: string): boolean {
+  // Convert simple glob pattern to regex: * → [^/]*, ** → .*
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '§§')
+    .replace(/\*/g, '[^/]*')
+    .replace(/§§/g, '.*')
+  return new RegExp(`^${escaped}$`, 'i').test(filePath)
 }
 
 export async function handlePushEvent(payload: PushPayload): Promise<void> {
-  const projectId = payload.project.id
-  const repositoryName = payload.project.name
+  const config = getConfig()
+  const resolved = resolveGitlabProject(payload.project.id, config)
 
-  // Collect all requirement files across all commits (deduplicated, preserve order)
+  if (!resolved) {
+    log.debug({ gitlabProjectId: payload.project.id }, 'Push: project not configured, ignoring')
+    return
+  }
+
+  if (!resolved.isDocsRepo) {
+    log.debug({ slug: resolved.projectSlug, repo: resolved.repoConfig.name }, 'Push to code repo, ignoring')
+    return
+  }
+
+  const { projectSlug, projectGroup } = resolved
+  const pushedBranch = payload.ref.replace(/^refs\/heads\//, '')
+
+  // Check branch filter
+  if (pushedBranch !== projectGroup.docs_branch) {
+    log.debug({ pushedBranch, expected: projectGroup.docs_branch }, 'Push to non-docs branch, ignoring')
+    return
+  }
+
+  const pattern = projectGroup.docs_path_pattern
+
+  // Collect matching files across all commits (deduplicated)
   const seen = new Set<string>()
   const reqFiles: string[] = []
   let latestCommitSha = ''
@@ -33,7 +59,7 @@ export async function handlePushEvent(payload: PushPayload): Promise<void> {
   for (const commit of payload.commits) {
     const changedFiles = [...(commit.added ?? []), ...(commit.modified ?? [])]
     for (const f of changedFiles) {
-      if (isRequirementFile(f) && !seen.has(f)) {
+      if (matchesPattern(f, pattern) && !seen.has(f)) {
         seen.add(f)
         reqFiles.push(f)
         latestCommitSha = commit.id
@@ -43,15 +69,15 @@ export async function handlePushEvent(payload: PushPayload): Promise<void> {
 
   if (reqFiles.length === 0) return
 
-  // Comma-separated so agent can read all files
   const filePath = reqFiles.join(',')
-  log.info({ projectId, files: reqFiles, commitSha: latestCommitSha }, 'Requirement file(s) detected')
+  log.info({ projectSlug, files: reqFiles, commitSha: latestCommitSha }, 'Requirement file(s) detected')
 
   await eventQueue.enqueue({
     type: 'REQUIREMENT_PUSHED',
-    projectId,
+    projectSlug,
+    gitlabProjectId: payload.project.id,
     commitSha: latestCommitSha,
     filePath,
-    repositoryName,
+    repositoryName: payload.project.name,
   })
 }

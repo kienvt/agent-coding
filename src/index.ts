@@ -56,8 +56,9 @@ async function main(): Promise<void> {
 
   // 5. Clone any repos in config that don't exist locally yet
   const cfg = await loadConfig()
-  if (cfg.repositories.length > 0) {
-    void ensureAllReposCloned(cfg.repositories, cfg.gitlab.url, cfg.gitlab.token)
+  const allRepos = cfg.projects.flatMap((g) => g.repositories)
+  if (allRepos.length > 0) {
+    void ensureAllReposCloned(allRepos, cfg.gitlab.url, cfg.gitlab.token)
   }
 
   // 6. Start orchestrator consumer loop

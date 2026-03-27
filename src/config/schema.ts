@@ -1,20 +1,34 @@
 import { z } from 'zod'
 
+const RepositoryRoleSchema = z.enum(['docs', 'code'])
+
 const RepositoryConfigSchema = z.object({
   name: z.string(),
   gitlab_project_id: z.number(),
   local_path: z.string(),
-  type: z.enum(['frontend', 'backend', 'infra', 'fullstack']),
+  type: z.enum(['frontend', 'backend', 'infra', 'fullstack', 'docs']),
   tags: z.array(z.string()).default([]),
+  role: RepositoryRoleSchema.default('code'),
+})
+
+const ProjectGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  docs_repo: z.string().default(''),
+  docs_branch: z.string().default('main'),
+  docs_path_pattern: z.string().default('requirement*'),
+  repositories: z.array(RepositoryConfigSchema).default([]),
 })
 
 const ConfigSchema = z.object({
   gitlab: z.object({
-    url: z.string().url(),
-    token: z.string().min(1),
-    webhook_secret: z.string().min(1),
+    // Allow empty strings so the server can boot without credentials configured.
+    // The UI shows a warning when these are empty.
+    url: z.string().default('https://gitlab.example.com'),
+    token: z.string().default(''),
+    webhook_secret: z.string().default(''),
   }),
-  repositories: z.array(RepositoryConfigSchema).default([]),
+  projects: z.array(ProjectGroupSchema).default([]),
   agent: z.object({
     model: z.string().default('claude-sonnet-4-6'),
     max_retries: z.number().int().min(1).default(3),
@@ -43,6 +57,8 @@ const ConfigSchema = z.object({
   }).default({}),
 })
 
+export type RepositoryRole = z.infer<typeof RepositoryRoleSchema>
 export type RepositoryConfig = z.infer<typeof RepositoryConfigSchema>
+export type ProjectGroupConfig = z.infer<typeof ProjectGroupSchema>
 export type Config = z.infer<typeof ConfigSchema>
-export { ConfigSchema }
+export { ConfigSchema, ProjectGroupSchema }

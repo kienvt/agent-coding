@@ -6,15 +6,17 @@ Read the implementation plan document and create GitLab issues for each task.
 
 1. Read the implementation plan file (path provided in prompt)
 2. Parse the list of features/tasks — identify each as a separate issue
-3. For each task, create an issue:
+3. For each task, create an issue with a `repo:` label indicating the target code repository:
 
 ```bash
 glab issue create \
   --title "{task title}" \
   --description "{description with acceptance criteria and technical notes}" \
-  --label "phase:implement,priority:high" \
+  --label "phase:implement,priority:high,repo:{targetRepoName}" \
   --assignee "@me"
 ```
+
+The `repo:{targetRepoName}` label is required — it tells the orchestrator which code repository to route this issue to during Phase 2 implementation. Use the repo names as they appear in the project config (e.g., `repo:bssd-backend`, `repo:bssd-frontend`).
 
 4. Collect the IID from each `glab issue create` output
 5. Output the list of created IIDs in this format:

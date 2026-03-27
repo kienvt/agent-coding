@@ -14,6 +14,28 @@ export type ProjectPhase =
 
 export type IssueStatus = 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CLOSED'
 
+export interface ProjectGroupState {
+  projectSlug: string
+  phase: ProjectPhase
+  requirementFile?: string
+  startedAt: string
+  updatedAt: string
+  error?: string
+}
+
+export interface RepoState {
+  projectSlug: string
+  repoName: string
+  gitlabProjectId: number
+  phase: ProjectPhase
+  issueIids: number[]
+  issueStatuses: Record<number, IssueStatus>
+  currentIssueIid?: number
+  mrIid?: number
+  error?: string
+}
+
+/** @deprecated Use ProjectGroupState + RepoState instead */
 export interface ProjectState {
   projectId: number
   repositoryName: string

@@ -2,11 +2,15 @@
 
 Read the requirement file(s), generate planning documents, UI mockups, create GitLab issues, and notify the team for review.
 
+You are running in the **docs repository**. All documentation and issues are created here.
+Code implementation will happen separately in the designated code repositories (listed in `codeRepos`).
+
 ## Context (provided in prompt)
 
 - `requirementFile` — one or more absolute paths, comma-separated. Supported: `.md`, `.txt`, `.pdf`
-- `repoName` — project name
-- `projectId` — GitLab project ID
+- `repoName` — docs repository name
+- `projectId` — GitLab project ID of the docs repository
+- `codeRepos` — comma-separated list of code repositories: `{name} (ID: {id})`
 
 ## Steps
 
@@ -66,8 +70,12 @@ Create the following files in `docs/`:
 **`docs/implementation-plan.md`** — Phased task list
 - Group tasks by phase (Setup → Core → Features → Polish)
 - Order by dependency (foundation before features)
-- Each task: title, description, acceptance criteria, estimated complexity
+- Each task: title, description, acceptance criteria, estimated complexity, **target repo**
 - Mark parallel tasks where possible
+
+The target repo for each task must be one of the repos listed in `codeRepos`.
+For each task, think carefully: is this a backend concern, frontend concern, or infrastructure concern?
+Match it to the appropriate repo by name.
 
 **`docs/README.md`** — Index
 - Links to all documents above
@@ -99,12 +107,27 @@ git add docs/
 git commit -m "docs: initialize project planning documents and UI mockups"
 ```
 
-### Step 6 — Create GitLab issues
+### Step 6 — Create GitLab issues with repo routing labels
 
-Use `/create-issues` skill:
+Use `/create-issues` skill with these additional requirements:
 - Source file: `docs/implementation-plan.md`
-- Creates one issue per task, ordered by dependency
-- Output: `ISSUE_IIDS: {comma-separated list}`
+- For each issue, add the label `repo:{targetRepoName}` based on the task's target repo
+  - Example: `repo:bssd-backend` for backend tasks, `repo:bssd-frontend` for frontend tasks
+- The `repo:` label is how Phase 2 routes each issue to the correct code repository
+
+Example glab command with repo label:
+```bash
+glab issue create \
+  --title "{task title}" \
+  --description "..." \
+  --label "phase:implement,priority:high,repo:{targetRepoName}" \
+  --assignee "@me"
+```
+
+Available code repos (use the exact name for the `repo:` label):
+`{codeRepos}`
+
+Output: `ISSUE_IIDS: {comma-separated list}`
 
 ### Step 7 — Push and notify
 

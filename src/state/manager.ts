@@ -1,15 +1,24 @@
 import { db } from '../db/index.js'
-import type { ProjectPhase, IssueStatus, ProjectState } from './types.js'
+import type { ProjectPhase, IssueStatus, ProjectGroupState, RepoState } from './types.js'
 import { createLogger } from '../utils/logger.js'
 import { logStore } from '../utils/log-store.js'
 
 const log = createLogger('state-manager')
 
-type StateRow = {
-  project_id: number
-  repo_name: string
+type GroupRow = {
+  project_slug: string
   phase: string
   req_file: string | null
+  error: string | null
+  started_at: number
+  updated_at: number
+}
+
+type RepoRow = {
+  project_slug: string
+  repo_name: string
+  gitlab_proj_id: number
+  phase: string
   issue_iids: string
   issue_statuses: string
   current_issue: number | null
@@ -19,136 +28,210 @@ type StateRow = {
   updated_at: number
 }
 
-function rowToState(row: StateRow): ProjectState {
+function rowToGroupState(row: GroupRow): ProjectGroupState {
   return {
-    projectId: row.project_id,
-    repositoryName: row.repo_name,
+    projectSlug: row.project_slug,
     phase: row.phase as ProjectPhase,
     requirementFile: row.req_file ?? undefined,
-    currentIssueIid: row.current_issue ?? undefined,
-    mrIid: row.mr_iid ?? undefined,
-    issueIids: JSON.parse(row.issue_iids) as number[],
-    issueStatuses: JSON.parse(row.issue_statuses) as Record<number, IssueStatus>,
     startedAt: new Date(row.started_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     error: row.error ?? undefined,
   }
 }
 
-const stmts = {
-  getById: db.prepare<[number], StateRow>('SELECT * FROM project_state WHERE project_id = ?'),
-  getAll: db.prepare<[], StateRow>('SELECT * FROM project_state ORDER BY updated_at DESC'),
+function rowToRepoState(row: RepoRow): RepoState {
+  return {
+    projectSlug: row.project_slug,
+    repoName: row.repo_name,
+    gitlabProjectId: row.gitlab_proj_id,
+    phase: row.phase as ProjectPhase,
+    issueIids: JSON.parse(row.issue_iids) as number[],
+    issueStatuses: JSON.parse(row.issue_statuses) as Record<number, IssueStatus>,
+    currentIssueIid: row.current_issue ?? undefined,
+    mrIid: row.mr_iid ?? undefined,
+    error: row.error ?? undefined,
+  }
+}
+
+const groupStmts = {
+  get: db.prepare<[string], GroupRow>('SELECT * FROM project_group_state WHERE project_slug = ?'),
+  getAll: db.prepare<[], GroupRow>('SELECT * FROM project_group_state ORDER BY updated_at DESC'),
   insert: db.prepare(`
-    INSERT INTO project_state (project_id, repo_name, phase, req_file, started_at, updated_at)
-    VALUES (@projectId, @repoName, 'IDLE', @reqFile, @now, @now)
+    INSERT INTO project_group_state (project_slug, phase, req_file, started_at, updated_at)
+    VALUES (@slug, 'IDLE', @reqFile, @now, @now)
   `),
   updatePhase: db.prepare(`
-    UPDATE project_state SET phase = @phase, error = NULL, updated_at = @now
-    WHERE project_id = @projectId
-  `),
-  insertHistory: db.prepare(`
-    INSERT INTO phase_history (project_id, from_phase, to_phase, occurred_at)
-    VALUES (@projectId, @fromPhase, @toPhase, @now)
-  `),
-  updateIssues: db.prepare(`
-    UPDATE project_state SET issue_iids = @iids, issue_statuses = @statuses, updated_at = @now
-    WHERE project_id = @projectId
-  `),
-  updateIssueStatuses: db.prepare(`
-    UPDATE project_state SET issue_statuses = @statuses, current_issue = @currentIssue, updated_at = @now
-    WHERE project_id = @projectId
-  `),
-  updateMR: db.prepare(`
-    UPDATE project_state SET mr_iid = @mrIid, updated_at = @now
-    WHERE project_id = @projectId
+    UPDATE project_group_state SET phase = @phase, error = NULL, updated_at = @now
+    WHERE project_slug = @slug
   `),
   setError: db.prepare(`
-    UPDATE project_state SET phase = 'ERROR', error = @error, updated_at = @now
-    WHERE project_id = @projectId
+    UPDATE project_group_state SET phase = 'ERROR', error = @error, updated_at = @now
+    WHERE project_slug = @slug
   `),
-  delete: db.prepare('DELETE FROM project_state WHERE project_id = ?'),
-  deleteHistory: db.prepare('DELETE FROM phase_history WHERE project_id = ?'),
+  delete: db.prepare('DELETE FROM project_group_state WHERE project_slug = ?'),
+}
+
+const repoStmts = {
+  get: db.prepare<[string, string], RepoRow>(
+    'SELECT * FROM repo_state WHERE project_slug = ? AND repo_name = ?'
+  ),
+  getAll: db.prepare<[string], RepoRow>(
+    'SELECT * FROM repo_state WHERE project_slug = ? ORDER BY repo_name ASC'
+  ),
+  insert: db.prepare(`
+    INSERT INTO repo_state (project_slug, repo_name, gitlab_proj_id, phase, started_at, updated_at)
+    VALUES (@slug, @repoName, @gitlabProjectId, 'IDLE', @now, @now)
+  `),
+  updatePhase: db.prepare(`
+    UPDATE repo_state SET phase = @phase, error = NULL, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updateIssues: db.prepare(`
+    UPDATE repo_state SET issue_iids = @iids, issue_statuses = @statuses, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updateIssueStatuses: db.prepare(`
+    UPDATE repo_state SET issue_statuses = @statuses, current_issue = @currentIssue, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updateMR: db.prepare(`
+    UPDATE repo_state SET mr_iid = @mrIid, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  setError: db.prepare(`
+    UPDATE repo_state SET phase = 'ERROR', error = @error, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  deleteAll: db.prepare('DELETE FROM repo_state WHERE project_slug = ?'),
 }
 
 export class StateManager {
-  initProjectState(
-    projectId: number,
-    repositoryName: string,
-    requirementFile?: string,
-  ): Promise<ProjectState> {
-    const existing = stmts.getById.get(projectId)
+  // ── Group-level ───────────────────────────────────────────────────
+
+  initGroupState(slug: string, requirementFile?: string): Promise<ProjectGroupState> {
+    const existing = groupStmts.get.get(slug)
     if (existing) {
-      log.info({ projectId }, 'State already exists, skipping init')
-      return Promise.resolve(rowToState(existing))
+      log.info({ slug }, 'Group state already exists, skipping init')
+      return Promise.resolve(rowToGroupState(existing))
     }
 
-    stmts.insert.run({ projectId, repoName: repositoryName, reqFile: requirementFile ?? null, now: Date.now() })
-    log.info({ projectId, repositoryName }, 'Project state initialized')
-    return Promise.resolve(rowToState(stmts.getById.get(projectId)!))
+    groupStmts.insert.run({ slug, reqFile: requirementFile ?? null, now: Date.now() })
+    log.info({ slug }, 'Group state initialized')
+    return Promise.resolve(rowToGroupState(groupStmts.get.get(slug)!))
   }
 
-  getProjectState(projectId: number): Promise<ProjectState | null> {
-    const row = stmts.getById.get(projectId)
-    return Promise.resolve(row ? rowToState(row) : null)
+  getGroupState(slug: string): Promise<ProjectGroupState | null> {
+    const row = groupStmts.get.get(slug)
+    return Promise.resolve(row ? rowToGroupState(row) : null)
   }
 
-  getAllProjectStates(): Promise<ProjectState[]> {
-    return Promise.resolve(stmts.getAll.all().map(rowToState))
+  getAllGroupStates(): Promise<ProjectGroupState[]> {
+    return Promise.resolve(groupStmts.getAll.all().map(rowToGroupState))
   }
 
-  async transitionPhase(projectId: number, newPhase: ProjectPhase): Promise<void> {
-    const row = stmts.getById.get(projectId)
-    if (!row) {
-      log.warn({ projectId }, 'Cannot transition phase: state not found')
-      return
-    }
+  async transitionGroupPhase(slug: string, newPhase: ProjectPhase): Promise<void> {
+    const row = groupStmts.get.get(slug)
+    if (!row) { log.warn({ slug }, 'Cannot transition group phase: state not found'); return }
 
     const fromPhase = row.phase
-    const now = Date.now()
-    stmts.updatePhase.run({ phase: newPhase, now, projectId })
-    stmts.insertHistory.run({ projectId, fromPhase, toPhase: newPhase, now })
+    groupStmts.updatePhase.run({ phase: newPhase, now: Date.now(), slug })
+    log.info({ slug, from: fromPhase, to: newPhase }, 'Group phase transition')
 
-    log.info({ projectId, from: fromPhase, to: newPhase }, 'Phase transition')
-
-    await logStore.append(projectId, {
+    await logStore.append(slug, {
       level: 'info',
       module: 'state-manager',
-      msg: `Phase transition: ${fromPhase} → ${newPhase}`,
+      msg: `Group phase: ${fromPhase} → ${newPhase}`,
     }).catch(() => {/* non-critical */})
   }
 
-  setIssueList(projectId: number, iids: number[]): Promise<void> {
-    const statuses: Record<number, IssueStatus> = {}
-    for (const iid of iids) statuses[iid] = 'OPEN'
-    stmts.updateIssues.run({
-      iids: JSON.stringify(iids),
-      statuses: JSON.stringify(statuses),
-      now: Date.now(),
-      projectId,
-    })
-    log.info({ projectId, count: iids.length }, 'Issue list set')
+  async setGroupError(slug: string, message: string): Promise<void> {
+    groupStmts.setError.run({ error: message, now: Date.now(), slug })
+    log.error({ slug, message }, 'Group state set to ERROR')
+    await logStore.append(slug, {
+      level: 'error',
+      module: 'state-manager',
+      msg: `Error: ${message}`,
+    }).catch(() => {/* non-critical */})
+  }
+
+  resetGroupState(slug: string): Promise<void> {
+    groupStmts.delete.run(slug)
+    repoStmts.deleteAll.run(slug)
+    log.info({ slug }, 'Group state reset')
     return Promise.resolve()
   }
 
-  updateIssueStatus(projectId: number, iid: number, status: IssueStatus): Promise<void> {
-    const row = stmts.getById.get(projectId)
+  // ── Repo-level ────────────────────────────────────────────────────
+
+  initRepoState(slug: string, repoName: string, gitlabProjectId: number): Promise<RepoState> {
+    const existing = repoStmts.get.get(slug, repoName)
+    if (existing) {
+      return Promise.resolve(rowToRepoState(existing))
+    }
+
+    repoStmts.insert.run({ slug, repoName, gitlabProjectId, now: Date.now() })
+    log.info({ slug, repoName }, 'Repo state initialized')
+    return Promise.resolve(rowToRepoState(repoStmts.get.get(slug, repoName)!))
+  }
+
+  getRepoState(slug: string, repoName: string): Promise<RepoState | null> {
+    const row = repoStmts.get.get(slug, repoName)
+    return Promise.resolve(row ? rowToRepoState(row) : null)
+  }
+
+  getAllRepoStates(slug: string): Promise<RepoState[]> {
+    return Promise.resolve(repoStmts.getAll.all(slug).map(rowToRepoState))
+  }
+
+  async transitionRepoPhase(slug: string, repoName: string, newPhase: ProjectPhase): Promise<void> {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) { log.warn({ slug, repoName }, 'Cannot transition repo phase: state not found'); return }
+
+    const fromPhase = row.phase
+    repoStmts.updatePhase.run({ phase: newPhase, now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, from: fromPhase, to: newPhase }, 'Repo phase transition')
+
+    await logStore.append(slug, {
+      level: 'info',
+      module: 'state-manager',
+      msg: `[${repoName}] Phase: ${fromPhase} → ${newPhase}`,
+    }).catch(() => {/* non-critical */})
+  }
+
+  setIssueList(slug: string, repoName: string, iids: number[]): Promise<void> {
+    const statuses: Record<number, IssueStatus> = {}
+    for (const iid of iids) statuses[iid] = 'OPEN'
+    repoStmts.updateIssues.run({
+      iids: JSON.stringify(iids),
+      statuses: JSON.stringify(statuses),
+      now: Date.now(),
+      slug,
+      repoName,
+    })
+    log.info({ slug, repoName, count: iids.length }, 'Issue list set')
+    return Promise.resolve()
+  }
+
+  updateIssueStatus(slug: string, repoName: string, iid: number, status: IssueStatus): Promise<void> {
+    const row = repoStmts.get.get(slug, repoName)
     if (!row) return Promise.resolve()
 
     const statuses = JSON.parse(row.issue_statuses) as Record<number, IssueStatus>
     statuses[iid] = status
     const currentIssue = status === 'IN_PROGRESS' ? iid : (row.current_issue ?? null)
-    stmts.updateIssueStatuses.run({
+    repoStmts.updateIssueStatuses.run({
       statuses: JSON.stringify(statuses),
       currentIssue,
       now: Date.now(),
-      projectId,
+      slug,
+      repoName,
     })
-    log.info({ projectId, iid, status }, 'Issue status updated')
+    log.info({ slug, repoName, iid, status }, 'Issue status updated')
     return Promise.resolve()
   }
 
-  getNextPendingIssue(projectId: number): Promise<number | null> {
-    const row = stmts.getById.get(projectId)
+  getNextPendingIssue(slug: string, repoName: string): Promise<number | null> {
+    const row = repoStmts.get.get(slug, repoName)
     if (!row) return Promise.resolve(null)
 
     const iids = JSON.parse(row.issue_iids) as number[]
@@ -157,8 +240,8 @@ export class StateManager {
     return Promise.resolve(next)
   }
 
-  areAllIssuesDone(projectId: number): Promise<boolean> {
-    const row = stmts.getById.get(projectId)
+  areAllIssuesDone(slug: string, repoName: string): Promise<boolean> {
+    const row = repoStmts.get.get(slug, repoName)
     if (!row) return Promise.resolve(false)
 
     const iids = JSON.parse(row.issue_iids) as number[]
@@ -168,27 +251,52 @@ export class StateManager {
     return Promise.resolve(iids.every((iid) => statuses[iid] === 'DONE' || statuses[iid] === 'CLOSED'))
   }
 
-  setMR(projectId: number, mrIid: number): Promise<void> {
-    stmts.updateMR.run({ mrIid, now: Date.now(), projectId })
-    log.info({ projectId, mrIid }, 'MR IID saved')
+  async appendIssueToRepo(slug: string, repoName: string, gitlabProjectId: number, iid: number): Promise<void> {
+    let row = repoStmts.get.get(slug, repoName)
+    if (!row) {
+      await this.initRepoState(slug, repoName, gitlabProjectId)
+      row = repoStmts.get.get(slug, repoName)!
+    }
+
+    const iids = JSON.parse(row.issue_iids) as number[]
+    if (iids.includes(iid)) return
+
+    const statuses = JSON.parse(row.issue_statuses) as Record<number, IssueStatus>
+    iids.push(iid)
+    statuses[iid] = 'OPEN'
+    repoStmts.updateIssues.run({
+      iids: JSON.stringify(iids),
+      statuses: JSON.stringify(statuses),
+      now: Date.now(),
+      slug,
+      repoName,
+    })
+    log.info({ slug, repoName, iid }, 'Issue appended to repo')
+  }
+
+  async areAllCodeRepoMRsApproved(slug: string, codeRepoNames: string[]): Promise<boolean> {
+    if (codeRepoNames.length === 0) return false
+    for (const repoName of codeRepoNames) {
+      const row = repoStmts.get.get(slug, repoName)
+      if (!row || row.phase !== 'MR_APPROVED') return false
+    }
+    return true
+  }
+
+  setMR(slug: string, repoName: string, mrIid: number): Promise<void> {
+    repoStmts.updateMR.run({ mrIid, now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, mrIid }, 'MR IID saved')
     return Promise.resolve()
   }
 
-  async setError(projectId: number, message: string): Promise<void> {
-    stmts.setError.run({ error: message, now: Date.now(), projectId })
-    log.error({ projectId, message }, 'Project state set to ERROR')
-    await logStore.append(projectId, {
+  async setRepoError(slug: string, repoName: string, message: string): Promise<void> {
+    repoStmts.setError.run({ error: message, now: Date.now(), slug, repoName })
+    log.error({ slug, repoName, message }, 'Repo state set to ERROR')
+    await logStore.append(slug, {
       level: 'error',
       module: 'state-manager',
-      msg: `Error: ${message}`,
+      msg: `[${repoName}] Error: ${message}`,
     }).catch(() => {/* non-critical */})
-  }
-
-  resetProjectState(projectId: number): Promise<void> {
-    stmts.delete.run(projectId)
-    stmts.deleteHistory.run(projectId)
-    log.info({ projectId }, 'Project state reset')
-    return Promise.resolve()
   }
 }
 

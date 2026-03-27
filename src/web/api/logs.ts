@@ -4,29 +4,27 @@ import { getRedis } from '../../queue/redis.js'
 import { logStore, LOG_PUBSUB_CHANNEL } from '../../utils/log-store.js'
 
 export function registerLogRoutes(app: Hono): void {
-  // GET /api/projects/:id/logs — last N entries
-  app.get('/api/projects/:id/logs', async (c) => {
-    const projectId = parseInt(c.req.param('id'), 10)
-    if (isNaN(projectId)) return c.json({ error: 'Invalid project id' }, 400)
-
+  // GET /api/projects/:slug/logs — last N entries
+  app.get('/api/projects/:slug/logs', async (c) => {
+    const slug = c.req.param('slug')
     const limit = Math.min(parseInt(c.req.query('limit') ?? '200', 10), 1000)
     const since = parseInt(c.req.query('since') ?? '0', 10)
 
     const entries = since > 0
-      ? await logStore.since(projectId, since)
-      : await logStore.tail(projectId, limit)
+      ? await logStore.since(slug, since)
+      : await logStore.tail(slug, limit)
 
     return c.json(entries)
   })
 
-  // GET /api/projects/:id/logs/stream — SSE live stream
-  app.get('/api/projects/:id/logs/stream', async (c) => {
-    const projectId = parseInt(c.req.param('id'), 10)
-    if (isNaN(projectId)) return c.json({ error: 'Invalid project id' }, 400)
+  // GET /api/projects/:slug/logs/stream — SSE live stream
+  app.get('/api/projects/:slug/logs/stream', async (c) => {
+    const slug = c.req.param('slug')
+    const repoFilter = c.req.query('repo') ?? null
 
     return streamSSE(c, async (stream) => {
       // 1. Backfill last 50 entries
-      const history = await logStore.tail(projectId, 50)
+      const history = await logStore.tail(slug, 50)
       for (const entry of history) {
         await stream.writeSSE({ data: JSON.stringify(entry) })
       }
@@ -37,10 +35,13 @@ export function registerLogRoutes(app: Hono): void {
 
       sub.on('message', async (_ch: string, msg: string) => {
         try {
-          const { projectId: pid, entry } = JSON.parse(msg) as { projectId: number; entry: unknown }
-          if (pid === projectId) {
-            await stream.writeSSE({ data: JSON.stringify(entry) })
-          }
+          const { projectSlug, entry } = JSON.parse(msg) as { projectSlug: string; entry: Record<string, unknown> }
+          if (projectSlug !== slug) return
+
+          // Filter by repo if requested
+          if (repoFilter && entry['module'] && !String(entry['module']).includes(repoFilter)) return
+
+          await stream.writeSSE({ data: JSON.stringify(entry) })
         } catch {
           // ignore malformed pub/sub messages
         }
@@ -64,12 +65,10 @@ export function registerLogRoutes(app: Hono): void {
     })
   })
 
-  // DELETE /api/projects/:id/logs — clear log history
-  app.delete('/api/projects/:id/logs', async (c) => {
-    const projectId = parseInt(c.req.param('id'), 10)
-    if (isNaN(projectId)) return c.json({ error: 'Invalid project id' }, 400)
-
-    await logStore.clear(projectId)
+  // DELETE /api/projects/:slug/logs — clear log history
+  app.delete('/api/projects/:slug/logs', async (c) => {
+    const slug = c.req.param('slug')
+    await logStore.clear(slug)
     return c.json({ ok: true })
   })
 }

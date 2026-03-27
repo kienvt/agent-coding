@@ -8,12 +8,13 @@ export type EventType =
 export interface BaseEvent {
   id: string
   type: EventType
-  projectId: number
+  projectSlug: string
   timestamp: string
 }
 
 export interface RequirementPushedEvent extends BaseEvent {
   type: 'REQUIREMENT_PUSHED'
+  gitlabProjectId: number
   commitSha: string
   filePath: string
   repositoryName: string
@@ -21,6 +22,7 @@ export interface RequirementPushedEvent extends BaseEvent {
 
 export interface IssueCommentEvent extends BaseEvent {
   type: 'ISSUE_COMMENT'
+  gitlabProjectId: number
   issueIid: number
   noteId: number
   authorUsername: string
@@ -29,6 +31,7 @@ export interface IssueCommentEvent extends BaseEvent {
 
 export interface MRReviewEvent extends BaseEvent {
   type: 'MR_REVIEW'
+  gitlabProjectId: number
   mrIid: number
   action: 'approved' | 'changes_requested' | 'commented'
   authorUsername: string
@@ -37,6 +40,7 @@ export interface MRReviewEvent extends BaseEvent {
 
 export interface MRMergedEvent extends BaseEvent {
   type: 'MR_MERGED'
+  gitlabProjectId: number
   mrIid: number
   mergedBy: string
 }
@@ -44,6 +48,7 @@ export interface MRMergedEvent extends BaseEvent {
 export interface TriggerPhaseEvent extends BaseEvent {
   type: 'TRIGGER_PHASE'
   phase: 'init' | 'implement' | 'review' | 'done'
+  filePath?: string
 }
 
 export type AgentEvent =

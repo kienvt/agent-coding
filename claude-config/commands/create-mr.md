@@ -4,11 +4,14 @@ Consolidate feature branches and create a Merge Request targeting main.
 
 ## Steps
 
-1. Get the list of completed issues:
+1. Get the list of completed issues from the **docs repo** (where issues live):
 ```bash
-glab issue list --label "phase:implement,status:done" --output json
+# issueProjectId is provided in context — use it to fetch issue details from the docs repo
+for IID in {issueIids split by comma}; do
+  glab api "projects/{issueProjectId}/issues/$IID" | jq '{iid: .iid, title: .title}'
+done
 ```
-Extract IIDs and titles.
+Extract IIDs and titles. Use `{issueProjectId}` (not the current code repo's project ID) for all issue API calls.
 
 2. **Consolidate branches** (if multiple feature branches):
 ```bash
@@ -61,9 +64,10 @@ MR_IID: {number}
 ## Input
 
 The prompt should provide:
-- List of issue IIDs
-- Project/repo context
-- Working directory
+- `issueIids` — comma-separated list of issue IIDs to include
+- `issueProjectId` — GitLab project ID of the **docs repo** where issues are tracked
+- `projectId` — GitLab project ID of the **current code repo** (for MR creation)
+- `repoName` — name of the current code repo
 
 ## Important
 

@@ -14,7 +14,7 @@ const CLAUDE_CONFIG_DIR = process.env['CLAUDE_CONFIG_DIR'] ?? join(process.cwd()
 export interface AgentRunOptions {
   prompt: string
   cwd: string
-  projectId?: number
+  projectSlug?: string
   allowedTools?: string[]
   maxTurns?: number
   systemPrompt?: string
@@ -61,7 +61,7 @@ export class AgentRunner {
     const {
       prompt,
       cwd,
-      projectId,
+      projectSlug,
       allowedTools = DEFAULT_TOOLS,
       maxTurns = config.agent.max_retries * 10,
       systemPrompt,
@@ -91,11 +91,16 @@ export class AgentRunner {
     let turns = 0
 
     try {
+      // Use system claude binary so local .claude/commands/ are loaded correctly.
+      // The SDK's bundled cli.js doesn't pick up project-level slash commands.
+      const claudeBin = process.env['CLAUDE_BIN'] ?? 'claude'
+
       const messages = query({
         prompt,
         options: {
           cwd,
           allowedTools,
+          pathToClaudeCodeExecutable: claudeBin,
           // God mode: bypass all permission checks — safe because we run in an isolated container
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
@@ -110,9 +115,9 @@ export class AgentRunner {
             if (block.type === 'text') {
               output += block.text
               onProgress?.(block.text)
-              // Stream agent output to log store if projectId is provided
-              if (projectId && block.text.trim()) {
-                await logStore.append(projectId, {
+              // Stream agent output to log store if projectSlug is provided
+              if (projectSlug && block.text.trim()) {
+                await logStore.append(projectSlug, {
                   level: 'agent',
                   module: 'agent-runner',
                   msg: block.text.slice(0, 500),
@@ -140,8 +145,8 @@ export class AgentRunner {
     durationMs ??= Date.now() - startMs
     log.info({ cwd, turns, cost, durationMs }, 'Agent run complete')
 
-    if (projectId) {
-      await logStore.append(projectId, {
+    if (projectSlug) {
+      await logStore.append(projectSlug, {
         level: 'info',
         module: 'agent-runner',
         msg: `Run complete — ${turns} turns, $${(cost ?? 0).toFixed(4)} cost, ${durationMs}ms`,

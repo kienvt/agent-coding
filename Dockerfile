@@ -6,17 +6,22 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 RUN corepack enable pnpm
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
+COPY src/web/client/package.json ./src/web/client/
 RUN pnpm install --frozen-lockfile
 
-# ─── Stage 2: Build TypeScript ─────────────────────────────────────────────────
+# ─── Stage 2: Build TypeScript + React ─────────────────────────────────────────
 FROM node:22-alpine AS builder
 WORKDIR /app
 
 RUN corepack enable pnpm
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/src/web/client/node_modules ./src/web/client/node_modules
 COPY . .
+# Build backend (tsup)
 RUN pnpm build
+# Build React frontend → public-dist/
+RUN pnpm ui:build
 
 # ─── Stage 3: Production runner ────────────────────────────────────────────────
 FROM node:22-alpine AS runner
@@ -32,8 +37,8 @@ RUN apk add --no-cache git openssh-client glab \
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
-# Copy frontend static files (not compiled by tsup, must be copied separately)
-COPY --from=builder /app/src/web/public ./dist/web/public
+# Copy React build output (built by Vite to public-dist/)
+COPY --from=builder /app/public-dist ./dist/public-dist
 # claude-config/ contains CLAUDE.md + skills + settings.json
 # mounted as /workspace/.claude via docker-compose volume; also bundled here as fallback
 COPY --from=builder /app/claude-config ./claude-config

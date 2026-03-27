@@ -35,16 +35,14 @@ app.get('/status', async (c) => {
     const queueLength = await eventQueue.queueLength()
 
     const states = await Promise.all(
-      config.repositories.map((repo) =>
-        stateManager.getProjectState(repo.gitlab_project_id),
-      ),
+      config.projects.map((group) => stateManager.getGroupState(group.id)),
     )
 
     return c.json({
       queue_length: queueLength,
       projects: states
         .filter(Boolean)
-        .map((s) => ({ projectId: s!.projectId, name: s!.repositoryName, phase: s!.phase })),
+        .map((s) => ({ projectSlug: s!.projectSlug, phase: s!.phase })),
     })
   } catch {
     return c.json({ queue_length: 0, projects: [] })
@@ -98,16 +96,16 @@ app.post('/webhook', async (c) => {
 })
 
 app.post('/trigger', async (c) => {
-  let body: { phase: string; project_id: number }
+  let body: { phase: string; project_slug: string; filePath?: string }
   try {
-    body = (await c.req.json()) as { phase: string; project_id: number }
+    body = (await c.req.json()) as { phase: string; project_slug: string; filePath?: string }
   } catch {
     return c.json({ error: 'Invalid JSON' }, 400)
   }
 
-  const { phase, project_id } = body
-  if (!phase || !project_id) {
-    return c.json({ error: 'phase and project_id are required' }, 400)
+  const { phase, project_slug } = body
+  if (!phase || !project_slug) {
+    return c.json({ error: 'phase and project_slug are required' }, 400)
   }
 
   const validPhases = ['init', 'implement', 'review', 'done'] as const
@@ -117,10 +115,11 @@ app.post('/trigger', async (c) => {
 
   const eventId = await eventQueue.enqueue({
     type: 'TRIGGER_PHASE',
-    projectId: project_id,
+    projectSlug: project_slug,
     phase: phase as 'init' | 'implement' | 'review' | 'done',
+    filePath: body.filePath,
   })
 
-  log.info({ phase, projectId: project_id, eventId }, 'Manual trigger enqueued')
+  log.info({ phase, projectSlug: project_slug, eventId }, 'Manual trigger enqueued')
   return c.json({ ok: true, eventId })
 })
