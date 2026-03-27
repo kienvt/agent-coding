@@ -81,11 +81,16 @@ if ! command -v glab >/dev/null 2>&1; then
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache glab
   elif command -v apt-get >/dev/null 2>&1; then
-    # Download latest .deb from GitHub releases
-    GLAB_VER=$(curl -sf "https://api.github.com/repos/gitlab-org/cli/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-    GLAB_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-    curl -fsSL "https://github.com/gitlab-org/cli/releases/download/${GLAB_VER}/glab_${GLAB_VER#v}_linux_${GLAB_ARCH}.deb" -o /tmp/glab.deb
-    sudo dpkg -i /tmp/glab.deb && rm /tmp/glab.deb
+    if command -v snap >/dev/null 2>&1; then
+      sudo snap install glab
+    else
+      # Download .deb — use known stable version as fallback if API fails
+      GLAB_VER=$(curl -sf --max-time 5 "https://api.github.com/repos/gitlab-org/cli/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+      GLAB_VER="${GLAB_VER:-v1.90.0}"
+      GLAB_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+      curl -fsSL "https://github.com/gitlab-org/cli/releases/download/${GLAB_VER}/glab_${GLAB_VER#v}_linux_${GLAB_ARCH}.deb" -o /tmp/glab.deb
+      sudo dpkg -i /tmp/glab.deb && rm -f /tmp/glab.deb
+    fi
   else
     echo "ERROR: Install glab manually: https://gitlab.com/gitlab-org/cli#installation" >&2; exit 1
   fi
