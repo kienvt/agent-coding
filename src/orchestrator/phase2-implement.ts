@@ -77,22 +77,40 @@ export async function startImplementationLoop(projectSlug: string): Promise<void
     }
 
     const repoAbsPath = path.resolve(workspacePath, targetRepo.local_path)
+    const docsRepoAbsPath = path.resolve(workspacePath, docsRepo.local_path)
     log.info({ projectSlug, iid: nextIid, repo: targetRepo.name }, 'Implementing issue')
     await stateManager.appendIssueToRepo(projectSlug, targetRepo.name, targetRepo.gitlab_project_id, nextIid)
     await stateManager.updateIssueStatus(projectSlug, docsRepo.name, nextIid, 'IN_PROGRESS')
+
+    // Sibling repos the agent can read for shared types, APIs, etc.
+    const siblingRepos = codeRepos
+      .filter((r) => r.name !== targetRepo.name)
+      .map((r) => `${r.name}: ${path.resolve(workspacePath, r.local_path)}`)
 
     const prompt = invokeSkill('implement-issue', {
       issueIid: nextIid,
       issueProjectId: docsRepo.gitlab_project_id,
       repoName: targetRepo.name,
       projectSlug,
+      docsRepoPath: docsRepoAbsPath,
+      siblingRepos: siblingRepos.length > 0 ? siblingRepos.join(', ') : null,
     })
+
+    const systemPrompt = [
+      `Docs repository (architecture docs, issues): ${docsRepoAbsPath}`,
+      siblingRepos.length > 0
+        ? `Sibling repositories (read for shared types/APIs, do NOT commit to them):\n${siblingRepos.map((r) => `  - ${r}`).join('\n')}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
 
     try {
       const result = await agentRunner.run({
         prompt,
         cwd: repoAbsPath,
         projectSlug,
+        systemPrompt,
         onProgress: (msg) => log.debug({ msg: msg.slice(0, 120) }, 'Agent progress'),
       })
 

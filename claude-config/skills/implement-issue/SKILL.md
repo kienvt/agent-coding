@@ -15,6 +15,8 @@ Available from `$ARGUMENTS`:
 - `issueProjectId` — GitLab project ID of the **docs repository** (where the issue was created)
 - `repoName` — name of the current **code repository** you are implementing in
 - `projectSlug` — project group identifier (for reference only)
+- `docsRepoPath` — absolute path to the docs repository (contains `docs/` with architecture, API docs)
+- `siblingRepos` — other code repos in this project, format: `name: /absolute/path` (read-only for shared types/APIs)
 
 ## Step 1 — Fetch issue details
 
@@ -48,14 +50,33 @@ glab api "projects/$ISSUE_PROJECT_ID/issues/$ISSUE_IID" \
 
 ## Step 3 — Read architecture context
 
-Before writing any code, read the architecture documents from the docs repository:
-- Look for `docs/` in the parent workspace directory (sibling of current repo)
-- Or check issue description for links to docs
+Before writing any code:
 
-Read these files if available:
-- `docs/architecture.md` — system design overview
-- `docs/api-documentation.md` — API contracts
-- Explore existing `src/` in the current code repo to understand patterns, naming conventions, and project structure
+**1. Read docs from `docsRepoPath` (from context):**
+```bash
+# docsRepoPath is provided in context — use its absolute path
+cat "$DOCS_REPO_PATH/docs/architecture.md"
+cat "$DOCS_REPO_PATH/docs/api-documentation.md"
+```
+
+**2. Read sibling repos for shared types/APIs (if `siblingRepos` is set):**
+Each entry in `siblingRepos` is `repoName: /absolute/path`.
+```bash
+# Example: if siblingRepos includes "common: /workspace/common"
+# Read its public interfaces before implementing:
+ls /workspace/common/src/
+cat /workspace/common/src/index.ts   # or equivalent entry point
+```
+- **Only read** from sibling repos — never commit to them
+- Look for: shared types, interfaces, exported utilities, API contracts
+- If this task depends on something not yet in a sibling repo, note it in the implementation and use a placeholder/interface
+
+**3. Explore current repo structure:**
+```bash
+ls src/
+cat src/index.ts  # or equivalent entry point
+```
+Understand existing patterns, naming conventions, and utilities before writing new code.
 
 ## Step 4 — Implement
 
