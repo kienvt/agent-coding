@@ -168,10 +168,7 @@ if [ "$1" = "--daemon" ] || [ "$2" = "--daemon" ]; then
     echo "==> Installing pm2..."
     sudo npm install -g pm2
   fi
-  pm2 start dist/index.js --name ai-agent-orchestrator \
-    --interpreter node \
-    --log-date-format "YYYY-MM-DD HH:mm:ss" \
-    -- 2>&1
+  pm2 start ecosystem.config.js
   pm2 save
   # Tự khởi động cùng server (chạy 1 lần)
   pm2 startup 2>/dev/null | grep "sudo" | sh 2>/dev/null || true
