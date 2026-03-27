@@ -30,14 +30,15 @@ services:
       # Mount claude-config/ as .claude/ at the workspace root so all repos inherit it
       # Claude Code traverses parent dirs looking for .claude/, so /workspace/.claude/ covers all
       - ./claude-config:/workspace/.claude:ro
-      # SQLite database + config.yaml — all persistent data in one named volume
-      - sqlite-data:/app/data
+      # SQLite database + config.yaml — bind mount so local ./data/ is used directly
+      - ${DATA_DIR:-./data}:/app/data
       - logs:/app/logs
       # Claude auth: mount host ~/.claude so subscription credentials are reused.
       # If ANTHROPIC_API_KEY is set above, this mount is unused but harmless.
       # If using subscription auth (no API key), this is required — run `claude auth login`
       # on the host first, then the container will reuse the same OAuth credentials.
-      - ${CLAUDE_AUTH_DIR:-~/.claude}:/root/.claude
+      - ${CLAUDE_AUTH_DIR:-~/.claude}:/home/agent/.claude
+      - ${CLAUDE_CONFIG_JSON:-~/.claude.json}:/home/agent/.claude.json
     depends_on:
       redis:
         condition: service_healthy
@@ -49,6 +50,8 @@ services:
     container_name: ai-agent-redis
     restart: unless-stopped
     command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:

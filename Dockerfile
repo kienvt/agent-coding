@@ -33,6 +33,9 @@ ENV NODE_ENV=production
 RUN apk add --no-cache git openssh-client glab \
   && glab version
 
+# Create non-root user — required because Claude Code refuses bypassPermissions when running as root
+RUN addgroup -S agent && adduser -S -G agent -h /home/agent agent
+
 # Copy built app
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
@@ -46,6 +49,10 @@ COPY --from=builder /app/claude-config ./claude-config
 # Copy startup script
 COPY scripts/setup-glab.sh /app/scripts/setup-glab.sh
 RUN chmod +x /app/scripts/setup-glab.sh
+
+# Set ownership and switch to non-root user
+RUN mkdir -p /workspace && chown -R agent:agent /app /workspace
+USER agent
 
 EXPOSE 3000
 

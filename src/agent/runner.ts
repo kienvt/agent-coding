@@ -99,8 +99,8 @@ export class AgentRunner {
           cwd,
           allowedTools,
           // God mode: bypass all permission checks — safe because we run in an isolated container
+          // Note: allowDangerouslySkipPermissions is intentionally omitted — it's blocked when running as root (Docker default)
           permissionMode: 'bypassPermissions',
-          allowDangerouslySkipPermissions: true,
           maxTurns,
           systemPrompt: systemContext,
           // Capture stderr so exit-code-1 errors are visible in logs
