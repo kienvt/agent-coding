@@ -4,33 +4,59 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-# ── 1. Check & install dependencies ──────────────────────────────────────────
-install_if_missing() {
-  CMD="$1"
-  PKG="${2:-$1}"
-  if ! command -v "$CMD" >/dev/null 2>&1; then
-    echo "==> Installing $PKG..."
-    if command -v apt-get >/dev/null 2>&1; then
-      sudo apt-get install -y "$PKG"
-    elif command -v brew >/dev/null 2>&1; then
-      brew install "$PKG"
-    elif command -v apk >/dev/null 2>&1; then
-      apk add --no-cache "$PKG"
-    else
-      echo "ERROR: Cannot install $PKG — please install it manually" >&2
-      exit 1
-    fi
+# Load .env
+if [ -f "$PROJECT_DIR/.env" ]; then
+  set -a; . "$PROJECT_DIR/.env"; set +a
+fi
+
+echo "============================================"
+echo " AI Agent Orchestrator — startup check"
+echo "============================================"
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: '$1' not found. $2" >&2; exit 1
   fi
 }
 
-install_if_missing git git
-install_if_missing ssh openssh-client
+install_pkg() {
+  CMD="$1"; PKG="${2:-$1}"
+  if command -v "$CMD" >/dev/null 2>&1; then return; fi
+  echo "==> Installing $PKG..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y "$PKG"
+  elif command -v brew >/dev/null 2>&1; then
+    brew install "$PKG"
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache "$PKG"
+  else
+    echo "ERROR: Cannot install $PKG — install manually" >&2; exit 1
+  fi
+}
 
-# glab (GitLab CLI) — tên package khác nhau tùy OS
+# ── 1. Node.js ────────────────────────────────────────────────────────────────
+need node "Install Node.js 22: https://nodejs.org"
+NODE_MAJOR=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  echo "ERROR: Node.js $NODE_MAJOR found, need >= 20" >&2; exit 1
+fi
+echo "==> node $(node --version) OK"
+
+# ── 2. pnpm ───────────────────────────────────────────────────────────────────
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "==> Installing pnpm..."
+  corepack enable pnpm || npm install -g pnpm
+fi
+echo "==> pnpm $(pnpm --version) OK"
+
+# ── 3. git + glab ─────────────────────────────────────────────────────────────
+install_pkg git git
+install_pkg ssh openssh-client
+
 if ! command -v glab >/dev/null 2>&1; then
   echo "==> Installing glab (GitLab CLI)..."
   if command -v apt-get >/dev/null 2>&1; then
-    # Ubuntu/Debian
     curl -s https://packagecloud.io/install/repositories/gitlab/cli/script.deb.sh | sudo bash
     sudo apt-get install -y glab
   elif command -v brew >/dev/null 2>&1; then
@@ -38,49 +64,73 @@ if ! command -v glab >/dev/null 2>&1; then
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache glab
   else
-    echo "ERROR: Cannot install glab — see https://gitlab.com/gitlab-org/cli#installation" >&2
-    exit 1
+    echo "ERROR: Install glab manually: https://gitlab.com/gitlab-org/cli#installation" >&2; exit 1
   fi
 fi
+echo "==> git $(git --version | cut -d' ' -f3), glab $(glab version | head -1 | awk '{print $3}') OK"
 
-echo "==> Dependencies OK (git=$(git --version), glab=$(glab --version | head -1))"
+# ── 4. git global config (required for git push) ──────────────────────────────
+if [ -z "$(git config --global user.email 2>/dev/null)" ]; then
+  BOT="${GITLAB_BOT_USERNAME:-ai-agent}"
+  git config --global user.email "${BOT}@noreply.local"
+  git config --global user.name "$BOT"
+  echo "==> git global config set (${BOT}@noreply.local)"
+fi
 
-# ── 2. glab auth ──────────────────────────────────────────────────────────────
+# ── 5. glab auth ──────────────────────────────────────────────────────────────
 if [ -n "${GITLAB_URL}" ] && [ -n "${GITLAB_TOKEN}" ]; then
   GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|^https\?://||' | sed 's|/.*||')
   echo "${GITLAB_TOKEN}" | glab auth login \
-    --hostname "$GITLAB_HOST" \
-    --stdin \
-    --git-protocol https 2>/dev/null \
+    --hostname "$GITLAB_HOST" --stdin --git-protocol https 2>/dev/null \
     && echo "==> glab auth OK" \
-    || echo "WARNING: glab auth failed"
+    || echo "WARNING: glab auth failed (non-fatal)"
+else
+  echo "WARNING: GITLAB_URL or GITLAB_TOKEN not set — configure via Web UI"
 fi
 
-# ── 3. Redis ──────────────────────────────────────────────────────────────────
+# ── 6. Claude Code auth ───────────────────────────────────────────────────────
+if ! claude --version >/dev/null 2>&1; then
+  echo "ERROR: 'claude' CLI not found. Install: npm install -g @anthropic-ai/claude-code" >&2
+  exit 1
+fi
+if ! claude config get 2>/dev/null | grep -q "email\|account\|logged" 2>/dev/null; then
+  # Best-effort check — don't fail if check itself errors
+  echo "WARNING: Claude may not be logged in. Run: claude auth login"
+fi
+echo "==> claude $(claude --version) OK"
+
+# ── 7. Redis ──────────────────────────────────────────────────────────────────
 REDIS_HOST=$(echo "${REDIS_URL:-redis://localhost:6379}" | sed 's|redis://||' | cut -d: -f1)
 REDIS_PORT=$(echo "${REDIS_URL:-redis://localhost:6379}" | sed 's|redis://||' | cut -d: -f2)
 
 if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>/dev/null | grep -q PONG; then
-  echo "==> Redis already running at $REDIS_HOST:$REDIS_PORT"
+  echo "==> Redis at $REDIS_HOST:$REDIS_PORT OK"
 else
   echo "==> Starting Redis via Docker..."
   docker compose up -d redis
   for i in $(seq 1 20); do
     if docker compose exec redis redis-cli ping 2>/dev/null | grep -q PONG; then
-      echo "==> Redis ready"
-      break
+      echo "==> Redis ready"; break
     fi
     sleep 1
   done
 fi
 
-# ── 4. Build ──────────────────────────────────────────────────────────────────
+# ── 8. Workspace dir ──────────────────────────────────────────────────────────
+WS="${WORKSPACE_PATH:-$PROJECT_DIR/workspace}"
+mkdir -p "$WS"
+echo "==> Workspace: $WS"
+
+# ── 9. Build ──────────────────────────────────────────────────────────────────
 if [ "$1" = "--build" ] || [ ! -f "$PROJECT_DIR/dist/index.js" ]; then
   echo "==> Building..."
+  pnpm install --frozen-lockfile
   pnpm build
   pnpm ui:build
 fi
 
-# ── 5. Start orchestrator ─────────────────────────────────────────────────────
+# ── 10. Start ─────────────────────────────────────────────────────────────────
+echo "============================================"
 echo "==> Starting orchestrator on port ${PORT:-3000}..."
+echo "============================================"
 exec node dist/index.js
