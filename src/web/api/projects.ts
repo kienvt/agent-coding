@@ -4,8 +4,54 @@ import { stateManager } from '../../state/manager.js'
 import { eventQueue } from '../../queue/event-queue.js'
 import { logStore } from '../../utils/log-store.js'
 import { ensureAllReposCloned } from '../../utils/repo-setup.js'
+import { createLogger } from '../../utils/logger.js'
 import type { ProjectPhase } from '../../state/types.js'
 import type { RepositoryConfig, ProjectGroupConfig } from '../../config/schema.js'
+
+const log = createLogger('projects-api')
+
+/**
+ * Register a webhook on a GitLab project.
+ * Skips silently if the webhook already exists (same URL).
+ */
+async function registerGitLabWebhook(gitlabProjectId: number, webhookUrl: string): Promise<void> {
+  const config = getConfig()
+  const { url: gitlabUrl, token, webhook_secret } = config.gitlab
+  if (!token || !webhook_secret) return
+
+  const apiBase = `${gitlabUrl}/api/v4/projects/${gitlabProjectId}/hooks`
+  const headers = { 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' }
+
+  // Check existing hooks to avoid duplicates
+  const listRes = await fetch(apiBase, { headers: { 'PRIVATE-TOKEN': token } })
+  if (listRes.ok) {
+    const existing = await listRes.json() as Array<{ url: string; id: number }>
+    if (existing.some((h) => h.url === webhookUrl)) {
+      log.info({ gitlabProjectId, webhookUrl }, 'Webhook already registered — skipping')
+      return
+    }
+  }
+
+  const res = await fetch(apiBase, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      url: webhookUrl,
+      token: webhook_secret,
+      push_events: true,
+      merge_requests_events: true,
+      note_events: true,
+      enable_ssl_verification: webhookUrl.startsWith('https'),
+    }),
+  })
+
+  if (res.ok) {
+    log.info({ gitlabProjectId, webhookUrl }, 'GitLab webhook registered')
+  } else {
+    const err = await res.text()
+    log.warn({ gitlabProjectId, webhookUrl, status: res.status, err }, 'Failed to register GitLab webhook')
+  }
+}
 
 const VALID_TRIGGER_PHASES = ['init', 'implement', 'review', 'done'] as const
 type TriggerPhase = (typeof VALID_TRIGGER_PHASES)[number]
@@ -16,6 +62,16 @@ function cloneReposAfterChange(): void {
   const cfg = getConfig()
   const allRepos = cfg.projects.flatMap((g) => g.repositories)
   void ensureAllReposCloned(allRepos, cfg.gitlab.url, cfg.gitlab.token)
+}
+
+/** Derive public webhook URL from PUBLIC_URL env or incoming request Host header. */
+function getWebhookUrl(req: Request): string {
+  if (process.env['PUBLIC_URL']) {
+    return `${process.env['PUBLIC_URL'].replace(/\/$/, '')}/webhook`
+  }
+  const host = req.headers.get('host') ?? 'localhost:3000'
+  const proto = req.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
+  return `${proto}://${host}/webhook`
 }
 
 // ── Route registration ────────────────────────────────────────────────────────
@@ -325,7 +381,12 @@ export function registerProjectRoutes(app: Hono): void {
     }
 
     cloneReposAfterChange()
-    return c.json({ ok: true, repository: newRepo }, 201)
+
+    // Auto-register GitLab webhook for this repo
+    const webhookUrl = getWebhookUrl(c.req.raw)
+    void registerGitLabWebhook(newRepo.gitlab_project_id, webhookUrl)
+
+    return c.json({ ok: true, repository: newRepo, webhook_url: webhookUrl }, 201)
   })
 
   // PUT /api/projects/:slug/repositories/:repoName — update repo (name is immutable)

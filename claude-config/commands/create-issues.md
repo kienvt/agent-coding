@@ -1,62 +1,58 @@
-# /create-issues — Create GitLab Issues from Implementation Plan
+---
+name: create-issues
+description: Read implementation plan and create GitLab issues with repo routing labels
+argument-hint: planFile=<path> projectId=<id>
+allowed-tools: Read, Bash
+---
 
-Read the implementation plan document and create GitLab issues for each task.
+Read the implementation plan and create GitLab issues. Context: $ARGUMENTS
 
 ## Steps
 
-1. Read the implementation plan file (path provided in prompt)
-2. Parse the list of features/tasks — identify each as a separate issue
-3. For each task, create an issue with a `repo:` label indicating the target code repository:
+1. Read the implementation plan file (path from context or default `docs/implementation-plan.md`)
+2. Parse all tasks — each becomes one issue
+3. For each task, create an issue with a `repo:` label for Phase 2 routing:
 
 ```bash
 glab issue create \
-  --title "{task title}" \
-  --description "{description with acceptance criteria and technical notes}" \
-  --label "phase:implement,priority:high,repo:{targetRepoName}" \
+  --title "$TASK_TITLE" \
+  --description "$DESCRIPTION" \
+  --label "phase:implement,priority:$PRIORITY,repo:$TARGET_REPO" \
   --assignee "@me"
 ```
 
-The `repo:{targetRepoName}` label is required — it tells the orchestrator which code repository to route this issue to during Phase 2 implementation. Use the repo names as they appear in the project config (e.g., `repo:bssd-backend`, `repo:bssd-frontend`).
-
-4. Collect the IID from each `glab issue create` output
-5. Output the list of created IIDs in this format:
+4. Collect the IID from each create output
+5. Output:
 
 ```
 ISSUE_IIDS: 1,2,3,4,5
 ```
 
-## Issue Description Template
+## Issue description template
 
 ```markdown
 ## Description
-{task description}
+$TASK_DESCRIPTION
 
 ## Acceptance Criteria
-- [ ] {criteria 1}
-- [ ] {criteria 2}
+- [ ] $CRITERIA
 
 ## Technical Notes
-{implementation hints, references to architecture/api docs}
+$NOTES
 
 ## Dependencies
-- Depends on: #{iid} (if applicable)
+- Depends on: #IID (if applicable)
 ```
 
-## Input
+## Priority mapping
 
-The prompt should provide:
-- Path to the implementation plan file
-- GitLab project context (project ID, repo name)
-
-## Priority Labels
-
-- First issue (project setup): `priority:critical`
+- Project setup: `priority:critical`
 - Core features: `priority:high`
 - Secondary features: `priority:medium`
 - Nice-to-have: `priority:low`
 
-## Important
+## Rules
 
-- Order issues by dependency (foundation before features)
-- Issues should be granular enough to implement in 1-2 hours
-- Each issue must have clear acceptance criteria
+- Order by dependency (foundation before features)
+- Each issue should be implementable in 1-2 hours
+- The `repo:` label is **required** — it routes the issue to the correct code repo in Phase 2

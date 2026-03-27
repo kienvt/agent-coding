@@ -19,6 +19,8 @@ services:
       - DATA_DIR=/app/data
       - PORT=3000
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Public URL for auto-registering GitLab webhooks (e.g. https://agent.example.com)
+      - PUBLIC_URL=${PUBLIC_URL:-}
       # claude-config/ is at /app/claude-config/ — used as fallback when .claude/ not yet deployed
       - CLAUDE_CONFIG_DIR=/app/claude-config
     volumes:

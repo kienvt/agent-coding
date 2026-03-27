@@ -1,76 +1,50 @@
-# /create-mr — Create a Merge Request
+---
+name: create-mr
+description: Consolidate feature branches and create a Merge Request targeting main
+argument-hint: issueIids=<iid1,iid2> issueProjectId=<id> projectId=<id> repoName=<name>
+allowed-tools: Read, Bash
+---
 
-Consolidate feature branches and create a Merge Request targeting main.
+Consolidate feature branches and create an MR. Context: $ARGUMENTS
 
 ## Steps
 
-1. Get the list of completed issues from the **docs repo** (where issues live):
+1. Fetch issue details from the docs repo (use `issueProjectId` from context):
 ```bash
-# issueProjectId is provided in context — use it to fetch issue details from the docs repo
-for IID in {issueIids split by comma}; do
-  glab api "projects/{issueProjectId}/issues/$IID" | jq '{iid: .iid, title: .title}'
+for IID in $ISSUE_IID_LIST; do
+  glab api "projects/$ISSUE_PROJECT_ID/issues/$IID" | jq '{iid: .iid, title: .title}'
 done
 ```
-Extract IIDs and titles. Use `{issueProjectId}` (not the current code repo's project ID) for all issue API calls.
 
 2. **Consolidate branches** (if multiple feature branches):
 ```bash
 git fetch origin
-git checkout -b feature/sprint-$(date +%Y%m%d) origin/main
+SPRINT_BRANCH="feature/sprint-$(date +%Y%m%d)"
+git checkout -b "$SPRINT_BRANCH" origin/main
 # For each issue branch:
-git merge feature/issue-{iid}-{slug} --no-edit
-# If conflict: resolve, then git add -A && git commit
-git push -u origin feature/sprint-$(date +%Y%m%d)
+git merge "feature/issue-$IID-$SLUG" --no-edit
+git push -u origin "$SPRINT_BRANCH"
 ```
 
-3. Build the MR description:
-```markdown
-## 🔀 Implementation Complete
-
-### Summary
-{brief summary of all changes}
-
-### Related Issues
-{for each issue:}
-- Closes #{iid} — {title}
-
-### Changes
-{bullet list of major changes}
-
-### Testing
-- [ ] Unit tests pass
-- [ ] Manual testing completed
-
-### Documentation
-- [ ] Architecture doc updated
-- [ ] README updated
-```
-
-4. Create the MR:
+3. Create the MR:
 ```bash
 glab mr create \
-  --source-branch "feature/sprint-{date}" \
+  --source-branch "$SPRINT_BRANCH" \
   --target-branch "main" \
-  --title "feat: complete implementation - {project name}" \
-  --description "{description}" \
+  --title "feat: complete implementation - $REPO_NAME" \
+  --description "$DESCRIPTION" \
   --label "phase:review"
 ```
 
-5. **Output the MR IID** on its own line:
+MR description must include `Closes #IID` for each issue to auto-close on merge.
+
+4. **Output on its own line**:
 ```
 MR_IID: {number}
 ```
 
-## Input
-
-The prompt should provide:
-- `issueIids` — comma-separated list of issue IIDs to include
-- `issueProjectId` — GitLab project ID of the **docs repo** where issues are tracked
-- `projectId` — GitLab project ID of the **current code repo** (for MR creation)
-- `repoName` — name of the current code repo
-
-## Important
+## Rules
 
 - Always output `MR_IID: {number}` so the orchestrator can capture it
-- Use `Closes #N` for each issue to auto-close on merge
-- If only one feature branch exists, use it directly (skip consolidation)
+- If only one feature branch, use it directly (skip consolidation)
+- Use `$ISSUE_PROJECT_ID` (docs repo) for issue API calls, not the current code repo ID
