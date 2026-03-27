@@ -36,10 +36,30 @@ install_pkg() {
 }
 
 # ── 1. Node.js ────────────────────────────────────────────────────────────────
-need node "Install Node.js 22: https://nodejs.org"
-NODE_MAJOR=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
-if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "ERROR: Node.js $NODE_MAJOR found, need >= 20" >&2; exit 1
+NODE_NEED=22
+install_node() {
+  echo "==> Installing Node.js $NODE_NEED..."
+  if command -v apt-get >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_NEED}.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  elif command -v brew >/dev/null 2>&1; then
+    brew install node@${NODE_NEED}
+    brew link node@${NODE_NEED} --force --overwrite 2>/dev/null || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache nodejs npm
+  else
+    echo "ERROR: Cannot install Node.js — install manually: https://nodejs.org" >&2; exit 1
+  fi
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  install_node
+else
+  NODE_MAJOR=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
+  if [ "$NODE_MAJOR" -lt 20 ]; then
+    echo "==> Node.js $NODE_MAJOR too old, upgrading..."
+    install_node
+  fi
 fi
 echo "==> node $(node --version) OK"
 
