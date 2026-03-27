@@ -31,12 +31,12 @@ export async function handlePushEvent(payload: PushPayload): Promise<void> {
   const resolved = resolveGitlabProject(payload.project.id, config)
 
   if (!resolved) {
-    log.debug({ gitlabProjectId: payload.project.id }, 'Push: project not configured, ignoring')
+    log.info({ gitlabProjectId: payload.project.id }, 'Push: project not configured, ignoring')
     return
   }
 
   if (!resolved.isDocsRepo) {
-    log.debug({ slug: resolved.projectSlug, repo: resolved.repoConfig.name }, 'Push to code repo, ignoring')
+    log.info({ slug: resolved.projectSlug, repo: resolved.repoConfig.name }, 'Push to code repo, ignoring')
     return
   }
 
@@ -45,7 +45,7 @@ export async function handlePushEvent(payload: PushPayload): Promise<void> {
 
   // Check branch filter
   if (pushedBranch !== projectGroup.docs_branch) {
-    log.debug({ pushedBranch, expected: projectGroup.docs_branch }, 'Push to non-docs branch, ignoring')
+    log.info({ pushedBranch, expected: projectGroup.docs_branch }, 'Push to non-docs branch, ignoring')
     return
   }
 
@@ -67,7 +67,10 @@ export async function handlePushEvent(payload: PushPayload): Promise<void> {
     }
   }
 
-  if (reqFiles.length === 0) return
+  if (reqFiles.length === 0) {
+    log.info({ projectSlug, pattern, branch: pushedBranch }, 'Push: no files match docs_path_pattern, ignoring')
+    return
+  }
 
   const filePath = reqFiles.join(',')
   log.info({ projectSlug, files: reqFiles, commitSha: latestCommitSha }, 'Requirement file(s) detected')

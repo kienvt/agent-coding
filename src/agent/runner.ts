@@ -91,16 +91,11 @@ export class AgentRunner {
     let turns = 0
 
     try {
-      // Use system claude binary so local .claude/commands/ are loaded correctly.
-      // The SDK's bundled cli.js doesn't pick up project-level slash commands.
-      const claudeBin = process.env['CLAUDE_BIN'] ?? 'claude'
-
       const messages = query({
         prompt,
         options: {
           cwd,
           allowedTools,
-          pathToClaudeCodeExecutable: claudeBin,
           // God mode: bypass all permission checks — safe because we run in an isolated container
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
