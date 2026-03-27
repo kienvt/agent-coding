@@ -103,6 +103,11 @@ export class AgentRunner {
           allowDangerouslySkipPermissions: true,
           maxTurns,
           systemPrompt: systemContext,
+          // Capture stderr so exit-code-1 errors are visible in logs
+          stderr: (text: string) => {
+            const trimmed = text.trim()
+            if (trimmed) log.error({ cwd, stderr: trimmed }, 'Claude Code stderr')
+          },
         },
       })
 
