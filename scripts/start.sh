@@ -66,7 +66,7 @@ echo "==> node $(node --version) OK"
 # ── 2. pnpm ───────────────────────────────────────────────────────────────────
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "==> Installing pnpm..."
-  corepack enable pnpm || npm install -g pnpm
+  sudo corepack enable pnpm 2>/dev/null || sudo npm install -g pnpm
 fi
 echo "==> pnpm $(pnpm --version) OK"
 
