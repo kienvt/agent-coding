@@ -161,4 +161,25 @@ fi
 echo "============================================"
 echo "==> Starting orchestrator on port ${PORT:-3000}..."
 echo "============================================"
-exec node dist/index.js
+
+if [ "$1" = "--daemon" ] || [ "$2" = "--daemon" ]; then
+  # Chạy ngầm bằng pm2
+  if ! command -v pm2 >/dev/null 2>&1; then
+    echo "==> Installing pm2..."
+    sudo npm install -g pm2
+  fi
+  pm2 start dist/index.js --name ai-agent-orchestrator \
+    --interpreter node \
+    --log-date-format "YYYY-MM-DD HH:mm:ss" \
+    -- 2>&1
+  pm2 save
+  # Tự khởi động cùng server (chạy 1 lần)
+  pm2 startup 2>/dev/null | grep "sudo" | sh 2>/dev/null || true
+  echo "==> Running in background. Commands:"
+  echo "    pm2 logs ai-agent-orchestrator   # xem logs"
+  echo "    pm2 status                       # xem status"
+  echo "    pm2 restart ai-agent-orchestrator"
+  echo "    pm2 stop ai-agent-orchestrator"
+else
+  exec node dist/index.js
+fi
