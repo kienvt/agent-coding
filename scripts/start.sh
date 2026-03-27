@@ -76,13 +76,16 @@ install_pkg ssh openssh-client
 
 if ! command -v glab >/dev/null 2>&1; then
   echo "==> Installing glab (GitLab CLI)..."
-  if command -v apt-get >/dev/null 2>&1; then
-    curl -s https://packagecloud.io/install/repositories/gitlab/cli/script.deb.sh | sudo bash
-    sudo apt-get install -y glab
-  elif command -v brew >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
     brew install glab
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache glab
+  elif command -v apt-get >/dev/null 2>&1; then
+    # Download latest .deb from GitHub releases
+    GLAB_VER=$(curl -sf "https://api.github.com/repos/gitlab-org/cli/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+    GLAB_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    curl -fsSL "https://github.com/gitlab-org/cli/releases/download/${GLAB_VER}/glab_${GLAB_VER#v}_linux_${GLAB_ARCH}.deb" -o /tmp/glab.deb
+    sudo dpkg -i /tmp/glab.deb && rm /tmp/glab.deb
   else
     echo "ERROR: Install glab manually: https://gitlab.com/gitlab-org/cli#installation" >&2; exit 1
   fi
