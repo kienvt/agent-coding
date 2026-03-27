@@ -6,7 +6,7 @@ services:
     container_name: ai-agent-orchestrator
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - GITLAB_TOKEN=${GITLAB_TOKEN:-}
