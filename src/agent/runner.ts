@@ -39,22 +39,23 @@ const DEFAULT_TOOLS = ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep']
  * In production (Docker), the volume mount handles it — this is a no-op safeguard.
  */
 function deployClaudeConfig(targetCwd: string): void {
-  const destClaudeDir = join(targetCwd, '.claude')
-
-  // Skip if .claude/ already exists (volume-mounted in Docker)
-  if (existsSync(destClaudeDir)) {
-    log.debug({ targetCwd }, 'Skipping deploy — .claude/ already exists (volume-mounted)')
-    return
-  }
-
   if (!existsSync(CLAUDE_CONFIG_DIR)) {
     log.warn({ claudeConfigDir: CLAUDE_CONFIG_DIR }, 'claude-config/ not found — agent will run without custom skills')
     return
   }
 
+  // In Docker, .claude/ is volume-mounted at /workspace/.claude (parent of all repos).
+  // Locally, we mirror that by deploying to <workspace>/.claude/ so all repos inherit it
+  // via Claude Code's parent-dir traversal — consistent with Docker behaviour.
+  const workspacePath = process.env['WORKSPACE_PATH']
+    ? join(process.cwd(), process.env['WORKSPACE_PATH'])
+    : join(targetCwd, '..')
+  const destClaudeDir = join(workspacePath, '.claude')
+
+  // Always sync so updates to claude-config/ are propagated on every run
   mkdirSync(destClaudeDir, { recursive: true })
   cpSync(CLAUDE_CONFIG_DIR, destClaudeDir, { recursive: true })
-  log.debug({ targetCwd, source: CLAUDE_CONFIG_DIR }, 'Deployed claude-config to .claude/')
+  log.debug({ workspacePath, source: CLAUDE_CONFIG_DIR }, 'Deployed claude-config to workspace .claude/')
 }
 
 export class AgentRunner {
