@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { RepositoryConfig } from '../config/index.js'
 import { logger } from './logger.js'
@@ -42,6 +42,7 @@ export async function ensureRepoCloned(
   const urlWithAuth = cloneUrl.replace('://', `://oauth2:${gitlabToken}@`)
 
   try {
+    mkdirSync(workspacePath, { recursive: true })
     logger.info(`Cloning ${repo.name} into ${repoAbsPath}...`)
     execSync(`git clone "${urlWithAuth}" "${repoAbsPath}"`, { stdio: 'pipe' })
     logger.info(`Cloned ${repo.name} successfully`)
