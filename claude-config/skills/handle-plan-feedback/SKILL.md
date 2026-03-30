@@ -2,12 +2,12 @@
 name: handle-plan-feedback
 description: Address feedback on the project plan — update docs, commit, reply on issue
 user-invocable: false
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 ## Context variables
 
 Available from `$ARGUMENTS`:
+
 - `authorUsername` — GitLab username who left the comment
 - `issueIid` — issue IID where feedback was posted
 - `feedbackBody` — the full text of the comment
@@ -15,6 +15,7 @@ Available from `$ARGUMENTS`:
 ## Step 1 — Read current planning state
 
 Read the relevant files in `docs/` to understand the current plan:
+
 - `docs/implementation-plan.md`
 - `docs/architecture.md` (if feedback touches architecture)
 - `docs/api-documentation.md` (if feedback touches API design)
@@ -38,6 +39,7 @@ If the feedback results in new or removed tasks, update `docs/implementation-pla
 ## Step 4 — Commit and push
 
 Use the `/commit` command:
+
 ```
 Message: "docs: address plan feedback from @$AUTHOR_USERNAME"
 ```

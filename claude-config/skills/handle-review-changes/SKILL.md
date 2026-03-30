@@ -2,12 +2,12 @@
 name: handle-review-changes
 description: Address all open MR review comments — fetch, fix, commit, push, notify reviewer
 user-invocable: false
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 ## Context variables
 
 Available from `$ARGUMENTS`:
+
 - `mrIid` — Merge Request IID
 
 ## Step 1 — Fetch review comments
@@ -43,6 +43,7 @@ For each comment, apply the appropriate action:
 ## Step 5 — Commit and push
 
 Use the `/commit` command:
+
 ```
 Message: "fix: address review comments on !$MR_IID"
 ```

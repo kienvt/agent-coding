@@ -2,7 +2,6 @@
 name: init-plan
 description: Full Phase 1 workflow — read requirements, generate planning docs and UI mockups, create GitLab issues
 user-invocable: false
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 You are running in the **docs repository**. All documentation and issues are created here.
@@ -11,6 +10,7 @@ Code implementation will happen separately in the designated code repositories (
 ## Context variables
 
 Available from `$ARGUMENTS`:
+
 - `requirementFile` — one or more absolute paths, comma-separated. Supported: `.md`, `.txt`, `.pdf`
 - `repoName` — docs repository name
 - `projectId` — GitLab project ID of the docs repository
@@ -27,6 +27,7 @@ for each path in requirementFile.split(',').map(s => s.trim()):
 ```
 
 Merge all content, then identify and extract:
+
 - Core features and user stories
 - Data entities and relationships
 - User roles and permissions
@@ -46,30 +47,35 @@ git checkout -b docs/init-plan origin/main
 Create the following files in `docs/`:
 
 **`docs/architecture.md`** — System overview
+
 - High-level component diagram (Mermaid)
 - Data flow between components
 - Technology stack decisions with rationale
 - Deployment topology
 
 **`docs/database-schema.md`** — Data model
+
 - ERD diagram (Mermaid)
 - Table/collection definitions with field types
 - Indexes and constraints
 - Migration notes
 
 **`docs/api-documentation.md`** — API contracts
+
 - All endpoints with method, path, description
 - Request body schemas with field types and validation rules
 - Response schemas for success and error cases
 - Authentication requirements per endpoint
 
 **`docs/test-cases.md`** — Test scenarios
+
 - Unit test scenarios for core business logic
 - Integration test scenarios for API endpoints
 - E2E test scenarios for critical user flows
 - Edge cases and error scenarios
 
 **`docs/implementation-plan.md`** — Phased task list
+
 - Group tasks by phase (Setup → Core → Features → Polish)
 - Order by dependency (foundation before features)
 - Each task: title, description, acceptance criteria, estimated complexity, **target repo**
@@ -80,6 +86,7 @@ For each task, think carefully: is this a backend concern, frontend concern, or 
 Match it to the appropriate repo by name.
 
 **`docs/README.md`** — Index
+
 - Links to all documents above
 - Quick start guide
 - Key decisions summary
@@ -97,6 +104,7 @@ Create self-contained HTML mockups in `docs/mockup/`:
 **`docs/mockup/screens/{screen-name}.html`** — One file per major UI screen (minimum 4 screens)
 
 Rules:
+
 - Self-contained: no CDN dependencies, all CSS/JS inline or in assets/
 - Responsive: works on desktop and mobile
 - Realistic fake data: use plausible names, dates, amounts
@@ -111,25 +119,32 @@ git commit -m "docs: initialize project planning documents and UI mockups"
 
 ## Step 6 — Create GitLab issues with repo routing labels
 
-Use the `/create-issues` command with these requirements:
-- Source file: `docs/implementation-plan.md`
-- For each issue, add the label `repo:{targetRepoName}` based on the task's target repo
-  - Example: `repo:bssd-backend` for backend tasks, `repo:bssd-frontend` for frontend tasks
-- The `repo:` label is how Phase 2 routes each issue to the correct code repository
+Read `docs/implementation-plan.md` and create one GitLab issue per task using `glab issue create`.
 
-Available code repos (use the exact name for the `repo:` label):
-Use the `codeRepos` value from context.
+Rules:
+- Use `--label "phase:implement,priority:{level},repo:{targetRepoName}"` on each issue
+- `repo:` label must match one of the repo names from `codeRepos` — this routes the issue to the correct code repo in Phase 2
+- Priority mapping: setup → `critical`, core features → `high`, secondary features → `medium`, nice-to-have → `low`
+- Order by dependency (foundation before features)
 
-Example glab command with repo label:
 ```bash
 glab issue create \
   --title "task title" \
-  --description "..." \
+  --description "## Description
+task description
+
+## Acceptance Criteria
+- [ ] criteria
+
+## Technical Notes
+notes" \
   --label "phase:implement,priority:high,repo:targetRepoName" \
   --assignee "@me"
 ```
 
-Output: `ISSUE_IIDS: {comma-separated list}`
+Collect the IID printed after each create. At the end output:
+
+`ISSUE_IIDS: {comma-separated list}`
 
 ## Step 7 — Push and notify
 
@@ -138,6 +153,7 @@ git push -u origin docs/init-plan
 ```
 
 Post summary on the first created issue:
+
 ```bash
 glab issue note $FIRST_ISSUE_IID --message "## Phase 1 Complete
 
@@ -154,6 +170,7 @@ Comment **'approve'** on this issue to start implementation."
 ## Output
 
 Must output on its own line (used by orchestrator to track issues):
+
 ```
 ISSUE_IIDS: {number},{number},...
 ```

@@ -7,6 +7,16 @@ import { startOrchestrator } from './orchestrator/index.js'
 import { createLogger } from './utils/logger.js'
 import { ensureAllReposCloned } from './utils/repo-setup.js'
 
+// Unset CLAUDECODE so the agent subprocess (claude CLI) can be spawned freely.
+// This process is an orchestrator, not a Claude Code session — the env var
+// is inherited when running from a Claude Code terminal and must be cleared.
+delete process.env['CLAUDECODE']
+
+// Expand ~ in WORKSPACE_PATH once at startup so all modules get the absolute path.
+if (process.env['WORKSPACE_PATH']?.startsWith('~')) {
+  process.env['WORKSPACE_PATH'] = process.env['WORKSPACE_PATH'].replace(/^~/, process.env['HOME'] ?? '')
+}
+
 const log = createLogger('main')
 
 async function setupGlab(): Promise<void> {

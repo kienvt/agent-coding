@@ -2,7 +2,8 @@
  * Build a slash command invocation prompt.
  *
  * Emits `/{skillName}` followed by context key-value pairs as $ARGUMENTS.
- * The command file in .claude/commands/{skillName}.md is loaded by the claude binary.
+ * Requires settingSources: ['user', 'project'] in query() options so the SDK
+ * loads .claude/commands/ and can resolve the slash command.
  */
 export function invokeSkill(
   skillName: string,

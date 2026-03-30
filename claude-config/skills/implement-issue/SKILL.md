@@ -2,7 +2,6 @@
 name: implement-issue
 description: Full Phase 2 workflow — fetch issue, create branch, implement code, write tests, commit, push, update issue
 user-invocable: false
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 You are running in the **code repository** for the target repo.
@@ -11,6 +10,7 @@ The GitLab issue lives in the **docs repository**. Use `issueProjectId` for all 
 ## Context variables
 
 Available from `$ARGUMENTS`:
+
 - `issueIid` — GitLab issue IID number
 - `issueProjectId` — GitLab project ID of the **docs repository** (where the issue was created)
 - `repoName` — name of the current **code repository** you are implementing in
@@ -42,6 +42,7 @@ git checkout -b "$BRANCH" origin/main
 ```
 
 Update issue status in docs repo:
+
 ```bash
 glab api "projects/$ISSUE_PROJECT_ID/issues/$ISSUE_IID" \
   --method PUT \
@@ -53,6 +54,7 @@ glab api "projects/$ISSUE_PROJECT_ID/issues/$ISSUE_IID" \
 Before writing any code:
 
 **1. Read docs from `docsRepoPath` (from context):**
+
 ```bash
 # docsRepoPath is provided in context — use its absolute path
 cat "$DOCS_REPO_PATH/docs/architecture.md"
@@ -61,26 +63,31 @@ cat "$DOCS_REPO_PATH/docs/api-documentation.md"
 
 **2. Read sibling repos for shared types/APIs (if `siblingRepos` is set):**
 Each entry in `siblingRepos` is `repoName: /absolute/path`.
+
 ```bash
 # Example: if siblingRepos includes "common: /workspace/common"
 # Read its public interfaces before implementing:
 ls /workspace/common/src/
 cat /workspace/common/src/index.ts   # or equivalent entry point
 ```
+
 - **Only read** from sibling repos — never commit to them
 - Look for: shared types, interfaces, exported utilities, API contracts
 - If this task depends on something not yet in a sibling repo, note it in the implementation and use a placeholder/interface
 
 **3. Explore current repo structure:**
+
 ```bash
 ls src/
 cat src/index.ts  # or equivalent entry point
 ```
+
 Understand existing patterns, naming conventions, and utilities before writing new code.
 
 ## Step 4 — Implement
 
 Write all required code files:
+
 - Follow existing code patterns, naming conventions, and file structure in the current repo
 - Fulfill every acceptance criterion listed in the issue
 - Handle errors gracefully with appropriate HTTP status codes or thrown errors
@@ -89,6 +96,7 @@ Write all required code files:
 ## Step 5 — Write tests
 
 Write tests alongside implementation:
+
 - Unit tests for business logic functions
 - Integration tests for API endpoints (if applicable)
 - Place tests in the directory structure mirroring `src/` (e.g., `src/foo/bar.ts` → `tests/foo/bar.test.ts`)
@@ -96,6 +104,7 @@ Write tests alongside implementation:
 ## Step 6 — Commit and push
 
 Use the `/commit` command:
+
 ```
 Message: "feat: implement #$ISSUE_IID - $ISSUE_TITLE"
 ```

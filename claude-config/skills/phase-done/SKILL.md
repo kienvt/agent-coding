@@ -2,12 +2,12 @@
 name: phase-done
 description: Phase 4 final workflow — merge MR, close all issues, clean up branches, post summary
 user-invocable: false
-allowed-tools: Read, Bash
 ---
 
 ## Context variables
 
 Available from `$ARGUMENTS`:
+
 - `mrIid` — Merge Request IID to merge
 - `issueIids` — comma-separated list of issue IIDs to close
 - `projectId` — GitLab project ID
@@ -19,6 +19,7 @@ glab mr merge $MR_IID --squash=false --delete-source-branch
 ```
 
 If merge fails due to conflicts:
+
 ```bash
 SOURCE_BRANCH=$(glab mr view $MR_IID --output json | jq -r '.source_branch')
 git fetch origin
@@ -42,6 +43,7 @@ Confirm `state === "merged"` before proceeding.
 ## Step 3 — Close all issues
 
 For each issue IID in the provided list:
+
 ```bash
 for IID in $(echo "$ISSUE_IIDS" | tr ',' ' '); do
   glab issue close $IID
@@ -78,6 +80,7 @@ glab mr note $MR_IID --message "## 🎉 Project Complete!
 ## Output
 
 Must output on its own line (used by orchestrator to detect completion):
+
 ```
 PHASE_COMPLETE: done
 ```
