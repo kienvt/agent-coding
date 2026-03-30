@@ -146,11 +146,39 @@ Collect the IID printed after each create. At the end output:
 
 `ISSUE_IIDS: {comma-separated list}`
 
-## Step 7 — Push and notify
+## Step 7 — Push, create MR, and notify
 
 ```bash
 git push -u origin docs/init-plan
 ```
+
+Create a Merge Request for review:
+
+```bash
+glab mr create \
+  --source-branch "docs/init-plan" \
+  --target-branch "main" \
+  --title "docs: initialize project planning documents and UI mockups" \
+  --description "## Summary
+
+Planning documents and UI mockups generated from requirements.
+
+**Includes:**
+- Architecture overview
+- Database schema
+- API documentation
+- Test cases
+- Implementation plan
+- UI mockups
+
+**Related issues:** $(echo $ISSUE_IIDS | tr ',' '\n' | sed 's/^/#/' | tr '\n' ' ')
+
+---
+Please review and merge to start implementation." \
+  --assignee "@me"
+```
+
+Output `MR_IID: {number}` after creating the MR.
 
 Post summary on the first created issue:
 
