@@ -12,11 +12,6 @@ import { ensureAllReposCloned } from './utils/repo-setup.js'
 // is inherited when running from a Claude Code terminal and must be cleared.
 delete process.env['CLAUDECODE']
 
-// Expand ~ in WORKSPACE_PATH once at startup so all modules get the absolute path.
-if (process.env['WORKSPACE_PATH']?.startsWith('~')) {
-  process.env['WORKSPACE_PATH'] = process.env['WORKSPACE_PATH'].replace(/^~/, process.env['HOME'] ?? '')
-}
-
 const log = createLogger('main')
 
 async function setupGlab(): Promise<void> {

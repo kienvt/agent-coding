@@ -4,6 +4,7 @@ import { stateManager } from '../state/manager.js'
 import { getConfig } from '../config/index.js'
 import type { MRReviewEvent } from '../queue/types.js'
 import { invokeSkill } from '../utils/skill.js'
+import { getWorkspacePath } from '../utils/repo-setup.js'
 import { createLogger } from '../utils/logger.js'
 import { runPhase4 } from './phase4-done.js'
 
@@ -27,7 +28,7 @@ export async function runPhase3(projectSlug: string): Promise<void> {
 
   const codeRepos = projectGroup.repositories.filter((r) => r.role === 'code')
   const docsRepo = projectGroup.repositories.find((r) => r.name === projectGroup.docs_repo)
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
 
   // Create an MR per code repo
   for (const repo of codeRepos) {
@@ -108,7 +109,7 @@ export async function handleMRReviewEvent(event: MRReviewEvent): Promise<void> {
     const repoConfig = projectGroup.repositories.find((r) => r.name === ownerRepo.repoName)
     if (!repoConfig) return
 
-    const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+    const workspacePath = getWorkspacePath()
     const repoAbsPath = path.resolve(workspacePath, repoConfig.local_path)
 
     const prompt = invokeSkill('handle-review-changes', {

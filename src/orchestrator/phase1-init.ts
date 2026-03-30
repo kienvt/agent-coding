@@ -6,6 +6,7 @@ import { getConfig } from '../config/index.js'
 import type { Config } from '../config/index.js'
 import type { RequirementPushedEvent, IssueCommentEvent } from '../queue/types.js'
 import { invokeSkill } from '../utils/skill.js'
+import { getWorkspacePath } from '../utils/repo-setup.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('phase1-init')
@@ -56,7 +57,7 @@ export async function handleRequirementPushed(
   await stateManager.initGroupState(event.projectSlug, event.filePath)
   await stateManager.transitionGroupPhase(event.projectSlug, 'ANALYZING')
 
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
   const docsRepoAbsPath = path.resolve(workspacePath, docsRepo.local_path)
 
   // Pull latest changes so the requirement file is available locally
@@ -131,7 +132,7 @@ export async function handlePlanFeedback(
   const docsRepo = projectGroup.repositories.find((r) => r.name === projectGroup.docs_repo)
   if (!docsRepo) return
 
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
   const docsRepoAbsPath = path.resolve(workspacePath, docsRepo.local_path)
 
   const prompt = invokeSkill('handle-plan-feedback', {

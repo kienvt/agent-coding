@@ -3,6 +3,7 @@ import { agentRunner } from '../agent/runner.js'
 import { stateManager } from '../state/manager.js'
 import { getConfig } from '../config/index.js'
 import { invokeSkill } from '../utils/skill.js'
+import { getWorkspacePath } from '../utils/repo-setup.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('phase4-done')
@@ -24,7 +25,7 @@ export async function runPhase4(projectSlug: string): Promise<void> {
   await stateManager.transitionGroupPhase(projectSlug, 'MERGING')
 
   const codeRepos = projectGroup.repositories.filter((r) => r.role === 'code')
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
   let allComplete = true
 
   for (const repo of codeRepos) {

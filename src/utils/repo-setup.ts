@@ -1,8 +1,18 @@
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { homedir } from 'node:os'
 import type { RepositoryConfig } from '../config/index.js'
 import { logger } from './logger.js'
+
+/**
+ * Returns WORKSPACE_PATH with `~` expanded to the home directory.
+ * Handles cases where the startup expansion in index.ts hasn't run (e.g. on server).
+ */
+export function getWorkspacePath(): string {
+  const raw = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  return raw.startsWith('~') ? raw.replace(/^~/, homedir()) : raw
+}
 
 /**
  * Clone a repository into the workspace if it doesn't already exist locally.
@@ -13,7 +23,7 @@ export async function ensureRepoCloned(
   gitlabUrl: string,
   gitlabToken: string,
 ): Promise<{ cloned: boolean; error?: string }> {
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
   const repoAbsPath = resolve(workspacePath, repo.local_path)
 
   if (existsSync(repoAbsPath)) {

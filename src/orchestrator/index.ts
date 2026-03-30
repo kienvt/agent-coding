@@ -11,6 +11,7 @@ import type {
   MRMergedEvent,
   TriggerPhaseEvent,
 } from '../queue/types.js'
+import { getWorkspacePath } from '../utils/repo-setup.js'
 import { handleRequirementPushed, handlePlanFeedback } from './phase1-init.js'
 import { startImplementationLoop, handleIssueCommentDuringImplementation } from './phase2-implement.js'
 import { runPhase3, handleMRReviewEvent } from './phase3-review.js'
@@ -134,7 +135,7 @@ async function notifyError(event: AgentEvent, err: unknown): Promise<void> {
   const docsRepo = projectGroup.repositories.find((r) => r.name === projectGroup.docs_repo)
   if (!docsRepo) return
 
-  const workspacePath = process.env['WORKSPACE_PATH'] ?? '/workspace'
+  const workspacePath = getWorkspacePath()
   const repoAbsPath = path.resolve(workspacePath, docsRepo.local_path)
   const errorMsg = err instanceof Error ? err.message : String(err)
 
