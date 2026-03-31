@@ -1,288 +1,213 @@
-# Kế hoạch: Refactor Implementation Flow
+# Kế hoạch: Implement Flow v2 (Demo-ready)
+
+**Mục tiêu**: Sửa đúng flow cốt lõi, đủ để demo. Không over-engineer.
+**Phức tạp / advanced**: xem `plan-implement-flow-v3.md`
+
+---
 
 ## Tổng quan thay đổi
 
 | # | Vấn đề hiện tại | Thay đổi |
 |---|-----------------|----------|
 | 1 | IMPLEMENTING trigger bằng comment "approve" | Trigger khi docs MR được **approved** |
-| 2 | Task chạy tuần tự, không có dependency awareness | Thêm phase `PLANNING` — lên lịch theo priority + dependency |
-| 3 | Agent hết token → task mất trạng thái | Lưu checkpoint khi bị interrupt, resume được |
-| 4 | Issue đóng ngay khi agent xong | Issue chỉ close khi MR của task đó được **merge** |
-| 5 | Issue không có lifecycle sau khi done | Reopen issue khi có comment yêu cầu update |
-| 6 | Chưa có flow xử lý change request chuẩn | 4 loại change request theo Agile standard |
+| 2 | Issue close ngay khi agent xong | Issue chỉ close khi MR của task **merged** |
+| 3 | `implement-issue` không tạo MR | Thêm Step 8: tạo MR sau khi implement xong |
+| 4 | Tasks chạy tuần tự dùng chung 1 directory | Git worktree per task — workspace sạch |
+| 5 | Không có priority ordering | Sắp xếp tasks theo `priority` label |
+| 6 | Agent hết token → mất trạng thái | Checkpoint đơn giản: lưu branch, resume được |
+| 7 | `mr.ts` vẫn dùng fallback bot username | Require `GITLAB_BOT_USERNAME` như `note.ts` |
 
 ---
 
 ## Phần 1 — Trigger IMPLEMENTING từ docs MR approved
 
-### Vấn đề hiện tại
-
-`dispatch` xử lý `ISSUE_COMMENT` với body `=== 'approve'` → `IMPLEMENTING`.
-Docs MR approved/merged bị **bỏ qua hoàn toàn** (không có code xử lý).
-
 ### Luồng mới
 
 ```
-docs MR approved (user click Approve trên GitLab)
+User approve docs MR trên GitLab
   → mr.ts enqueue MR_REVIEW { action: 'approved', mrIid }
-  → dispatch: phát hiện mrIid === docsMrIid trong group state
+  → dispatch: mrIid === state.docsMrIid && phase === 'AWAITING_REVIEW'
   → transitionGroupPhase('PLANNING')
   → startPlanningPhase(projectSlug)
 ```
 
-### Thay đổi cần làm
+### Thay đổi
 
-**1. Lưu docs MR IID vào group state**
+**DB migration** — thêm cột `docs_mr_iid INTEGER` vào `project_group_state`
 
-Phase 1 agent output `MR_IID: {n}` (đã có trong init-plan skill Step 7).
-`handleRequirementPushed` cần parse thêm `MR_IID` từ output và lưu vào DB.
+**`src/state/types.ts`** — thêm field `docsMrIid?: number` vào `ProjectGroupState`
 
-- Thêm cột `docs_mr_iid INTEGER` vào bảng `project_group_state`
-- Thêm method `setDocsMrIid(slug, mrIid)` trong `StateManager`
-- Thêm field `docsMrIid?: number` vào `ProjectGroupState`
+**`src/state/manager.ts`** — thêm method `setDocsMrIid(slug, mrIid)`
 
-**2. Xử lý MR_REVIEW (approved) cho docs MR trong dispatch**
-
+**`src/orchestrator/phase1-init.ts`** — sau `agentRunner.run`, parse `MR_IID:` từ output:
 ```typescript
-case 'MR_REVIEW': {
-  const e = event as MRReviewEvent
-  const state = await stateManager.getGroupState(e.projectSlug)
-  if (!state) break
+const mrIid = parseMrIid(result.output)
+if (mrIid) await stateManager.setDocsMrIid(event.projectSlug, mrIid)
+```
 
-  // Docs MR approved → trigger planning
-  if (e.action === 'approved' && state.docsMrIid === e.mrIid
-      && state.phase === 'AWAITING_REVIEW') {
-    await stateManager.transitionGroupPhase(e.projectSlug, 'PLANNING')
-    startPlanningPhase(e.projectSlug).catch(...)
-    break
-  }
-
-  // Code MRs (phase 3) — giữ nguyên logic hiện tại
-  if (state.phase === 'AWAITING_MR_REVIEW' || state.phase === 'MR_CREATED') {
-    await handleMRReviewEvent(e)
-  }
+**`src/orchestrator/index.ts`** — sửa `MR_REVIEW` handler:
+```typescript
+// Docs MR approved → trigger planning
+if (e.action === 'approved'
+    && state.docsMrIid === e.mrIid
+    && state.phase === 'AWAITING_REVIEW') {
+  await stateManager.transitionGroupPhase(e.projectSlug, 'PLANNING')
+  startPlanningPhase(e.projectSlug).catch(...)
   break
+}
+// Code MRs (phase 3) — giữ nguyên
+if (state.phase === 'AWAITING_MR_REVIEW' || state.phase === 'MR_CREATED') {
+  await handleMRReviewEvent(e)
 }
 ```
 
-**3. Bỏ "approve" comment trigger**
-
-Xóa block xử lý `e.body?.trim().toLowerCase() === 'approve'` trong `ISSUE_COMMENT` handler.
-Giữ lại `handlePlanFeedback` cho các comment khác khi phase là `AWAITING_REVIEW`.
-
-**4. Fix mr.ts — botUsername cũng cần require env var**
-
-`mr.ts` hiện vẫn dùng `?? 'ai-agent'` fallback. Cần đồng bộ với `note.ts`: nếu không set thì từ chối xử lý.
+**`src/orchestrator/index.ts`** — xóa block `e.body?.trim().toLowerCase() === 'approve'`
 
 ---
 
-## Phần 2 — Planning phase (dependency + priority)
+## Phần 2 — Planning phase (priority ordering)
+
+### Mục tiêu
+
+Sắp xếp issues theo `priority` label trước khi implement. **Không có dependency graph** — để v3.
 
 ### Phase mới: `PLANNING`
 
-Sau khi docs MR approved, orchestrator phân tích tất cả issues, sắp xếp theo dependency graph và priority trước khi bắt đầu implement.
+Thêm `'PLANNING'` vào `ProjectPhase` trong `src/state/types.ts`.
 
-### Dependency format
+### Thêm `planned_order` vào state
 
-Trong description của mỗi GitLab issue, thêm section:
+**DB migration** — thêm cột `planned_order TEXT NOT NULL DEFAULT '[]'` vào `repo_state`
 
-```markdown
-## Dependencies
-- #3
-- #7
-```
+**`src/state/manager.ts`** — thêm methods:
+- `setPlannedOrder(slug, repoName, iids: number[])`
+- `getNextPlannedIssue(slug, repoName): number | null` — lấy IID đầu tiên chưa `DONE`/`CLOSED`/`MR_OPEN`, ưu tiên `INTERRUPTED` trước `OPEN`
 
-Agent trong `init-plan` skill cần thêm section này khi tạo issues nếu task phụ thuộc nhau.
-
-### Thuật toán lên lịch
-
-```
-1. Fetch toàn bộ OPEN issues từ GitLab API (đã có issue_iids trong state)
-2. Build dependency graph: Map<iid, Set<iid>> (adjacency list)
-3. Topological sort (Kahn's algorithm):
-   - Tính in-degree cho mỗi node
-   - Queue các node có in-degree = 0, ưu tiên theo priority label:
-       critical=4 > high=3 > medium=2 > low=1
-4. Kết quả: mảng ordered issue IIDs → lưu vào state
-
-Priority label mapping:
-  priority:critical → 4
-  priority:high     → 3
-  priority:medium   → 2
-  priority:low      → 1
-```
-
-Nếu có **cyclic dependency** → log warning, bỏ qua dependency edge đó và tiếp tục.
-
-### Thay đổi cần làm
-
-**1. Thêm `ProjectPhase`: `'PLANNING'`** vào `src/state/types.ts`
-
-**2. Thêm state lưu planned order**
-
-Thêm cột `planned_order TEXT DEFAULT '[]'` vào `repo_state` (JSON array of issue IIDs).
-Thêm methods:
-- `setPlannedOrder(slug, repoName, iids[])`
-- `getNextPlannedIssue(slug, repoName)` — trả về IID đầu tiên trong planned_order chưa `DONE`/`CLOSED`
-
-**3. Tạo file `src/orchestrator/phase2-plan.ts`**
+### Tạo `src/orchestrator/phase2-plan.ts`
 
 ```typescript
-export async function startPlanningPhase(projectSlug: string): Promise<void>
-  // 1. Fetch issues từ GitLab API (title, labels, description)
-  // 2. Parse dependencies từ description của mỗi issue
-  // 3. Topological sort + priority weighting
-  // 4. setPlannedOrder() cho từng code repo
-  // 5. transitionGroupPhase(projectSlug, 'IMPLEMENTING')
-  // 6. startImplementationLoop()
+export async function startPlanningPhase(projectSlug: string): Promise<void> {
+  // 1. Fetch issues từ GitLab API: title + labels
+  // 2. Sort theo priority label: critical=4, high=3, medium=2, low=1
+  // 3. setPlannedOrder() cho từng code repo (filter theo repo: label)
+  // 4. transitionGroupPhase('IMPLEMENTING')
+  // 5. startImplementationLoop()
+}
 ```
-
-**4. Sửa `startImplementationLoop`**
-
-Thay vì `getNextPendingIssue` (lấy OPEN bất kỳ), dùng `getNextPlannedIssue` (theo thứ tự đã lên lịch).
-Trước khi implement một issue, kiểm tra tất cả dependencies đã `DONE` chưa — nếu chưa thì skip và lấy task tiếp theo có thể implement.
 
 ---
 
-## Phần 3 — Token exhaustion / Checkpoint
+## Phần 3 — Git worktree per task (sequential)
 
 ### Vấn đề
 
-Khi agent bị interrupt do hết token (`error_max_turns` từ SDK), task ở trạng thái lửng — code đã viết một phần, không biết dừng ở đâu.
+Dùng chung một directory → tasks kế tiếp nhau vẫn có thể conflict nếu branch cũ chưa được clean.
 
-### Cơ chế checkpoint
+### Giải pháp
 
-**Phía orchestrator** (`AgentRunner.run`):
+Mỗi task tạo worktree riêng, cleanup sau khi MR merged. **Sequential** — không parallel.
+
+### Cấu trúc workspace
+
+```
+/workspace/
+  repos/                  ← main branch, READ-ONLY reference
+    docs/
+    backend/
+    frontend/
+  tasks/                  ← active worktrees
+    5-backend/            ← issue #5, repo backend
+    7-frontend/           ← issue #7, repo frontend
+```
+
+### Tạo/cleanup worktree
 
 ```typescript
-for await (const message of messages) {
-  if (message.type === 'result') {
-    if (message.subtype === 'error_max_turns') {
-      // Đánh dấu interrupted — không throw error
-      interrupted = true
-    }
-  }
-}
-// Sau loop: nếu interrupted → return { success: false, interrupted: true, ... }
+// Tạo worktree:
+git -C /workspace/repos/backend \
+  worktree add /workspace/tasks/5-backend \
+  -b feature/issue-5-auth origin/main
+
+// Cleanup sau MR merged:
+git -C /workspace/repos/backend worktree remove /workspace/tasks/5-backend
 ```
 
-`AgentRunResult` thêm field `interrupted: boolean`.
-
-**Phía implementation loop** (`startImplementationLoop`):
-
-```typescript
-const result = await agentRunner.run({ ... })
-
-if (result.interrupted) {
-  // Lưu checkpoint từ git
-  const branch = execSync('git branch --show-current', { cwd: repoAbsPath }).toString().trim()
-  const gitLog = execSync('git log --oneline -5', { cwd: repoAbsPath }).toString().trim()
-  await stateManager.saveCheckpoint(projectSlug, targetRepo.name, nextIid, {
-    branch,
-    gitLog,
-    interruptedAt: new Date().toISOString(),
-  })
-  await stateManager.updateIssueStatus(projectSlug, docsRepo.name, nextIid, 'INTERRUPTED')
-  break  // Dừng loop, chờ resume
-}
-```
-
-**Resume khi orchestrator restart hoặc có trigger thủ công:**
-
-`getNextPlannedIssue` ưu tiên status `INTERRUPTED` trước `OPEN`.
-Khi pick issue `INTERRUPTED`, orchestrator đọc checkpoint và thêm vào system prompt:
+### System prompt cho agent
 
 ```
-Previously interrupted. Git state:
-Branch: feature/issue-5-auth-service
-Recent commits:
-  abc1234 feat: add JWT validation
-  def5678 feat: add user model
+Working directory (write target): /workspace/tasks/5-backend
 
-Continue from where you left off. Check git log and existing code before writing new code.
+Read-only references (DO NOT commit to these):
+  docs:           /workspace/repos/docs
+  backend-common: /workspace/repos/backend-common
 ```
 
-**Thay đổi DB:**
+### Thay đổi
 
-Thêm cột `checkpoints TEXT DEFAULT '{}'` vào `repo_state` — JSON map `{ [iid]: CheckpointData }`.
+**`src/state/types.ts`** — thêm `worktreePath?: string` vào `CheckpointData`
 
-Thêm `IssueStatus`: `'INTERRUPTED'`
+**`src/utils/worktree.ts`** — tạo mới:
+- `createWorktree(repoName, issueIid, branch): string`
+- `removeWorktree(repoName, worktreePath): void`
+
+**`src/orchestrator/phase2-implement.ts`** — dùng worktree path làm `cwd`, update system prompt với read-only refs
+
+**`src/orchestrator/index.ts`** — `MR_MERGED` handler: gọi `removeWorktree` sau khi close issue
 
 ---
 
 ## Phần 4 — Task lifecycle tied to MR
 
-### Vấn đề hiện tại
-
-- `implement-issue` skill kết thúc ở Step 7 (update label) — **không tạo MR**
-- Issue được mark `DONE` ngay khi agent run xong, không chờ MR merge
-
 ### Luồng mới
 
 ```
 implement-issue xong
-  → agent tạo MR trên code repo (mới)
-  → agent output "MR_IID: {n}"
-  → orchestrator: updateIssueStatus(iid, 'MR_OPEN'), lưu issueToMr[iid] = mrIid
+  → agent tạo MR (Step 8 mới), output "MR_IID: {n}"
+  → orchestrator: lưu issueToMr[iid] = mrIid, updateIssueStatus('MR_OPEN')
 
-MR được merge
-  → mr.ts enqueue MR_MERGED { mrIid }
-  → dispatch: tìm issue có issueToMr[iid] === mrIid
-  → glab issue close {iid} (trong docs repo)
-  → updateIssueStatus(iid, 'DONE')
+MR_MERGED
+  → tìm issue có issueToMr[iid] === mergedMrIid
+  → glab issue close {iid}
+  → updateIssueStatus('DONE')
+  → removeWorktree
 
-Comment vào issue đã DONE
-  → ISSUE_COMMENT event
-  → dispatch: status === 'DONE' → updateIssueStatus(iid, 'REOPENED')
-  → thêm lại vào planned order với priority cao
-  → nếu phase là IMPLEMENTING → agent xử lý luôn
-  → nếu phase khác → chờ đến khi IMPLEMENTING
+Comment vào issue DONE
+  → updateIssueStatus('REOPENED')
+  → prependToPlannedOrder (priority cao)
+  → nếu phase IMPLEMENTING → trigger loop
 ```
 
-### Thay đổi cần làm
+### Thay đổi
 
-**1. `implement-issue` skill — thêm Step 8: tạo MR**
+**`src/state/types.ts`** — thêm statuses: `'MR_OPEN' | 'INTERRUPTED' | 'REOPENED'`
 
-```bash
-# Step 8 — Create Merge Request
-glab mr create \
-  --source-branch "$BRANCH" \
-  --target-branch "main" \
-  --title "feat: implement #$ISSUE_IID - $ISSUE_TITLE" \
-  --description "Closes #$ISSUE_IID" \
-  --assignee "@me"
-```
+**DB migration** — thêm cột `issue_to_mr TEXT NOT NULL DEFAULT '{}'` vào `repo_state`
 
-Output: `MR_IID: {number}` (orchestrator parse)
+**`src/state/manager.ts`** — thêm:
+- `setIssueMr(slug, repoName, iid, mrIid)`
+- `prependToPlannedOrder(slug, repoName, iid)`
+- `getIssueOwnerRepo(slug, iid): string | null` — tìm repoName từ issueToMr map
 
-**2. Thêm `issueToMr` mapping vào repo state**
-
-Thêm cột `issue_to_mr TEXT DEFAULT '{}'` vào `repo_state` — JSON `{ [iid]: mrIid }`.
-Thêm method `setIssueMr(slug, repoName, iid, mrIid)`.
-
-**3. Sửa `startImplementationLoop` — parse MR_IID sau agent run**
-
+**`src/orchestrator/phase2-implement.ts`** — sau agent run:
 ```typescript
 const mrIid = parseMrIid(result.output)
-if (mrIid) {
-  await stateManager.setIssueMr(projectSlug, docsRepo.name, nextIid, mrIid)
-}
+if (mrIid) await stateManager.setIssueMr(projectSlug, docsRepo.name, nextIid, mrIid)
 await stateManager.updateIssueStatus(projectSlug, docsRepo.name, nextIid, 'MR_OPEN')
-// KHÔNG mark DONE ở đây nữa
+// Không mark DONE ở đây
 ```
 
-**4. Sửa `MR_MERGED` dispatch handler**
-
+**`src/orchestrator/index.ts`** — `MR_MERGED` handler:
 ```typescript
 case 'MR_MERGED': {
-  // Tìm issue nào có issueToMr[iid] === mergedMrIid
   const repoStates = await stateManager.getAllRepoStates(e.projectSlug)
   for (const rs of repoStates) {
-    const iid = Object.entries(rs.issueToMr ?? {})
-      .find(([, mrIid]) => mrIid === e.mrIid)?.[0]
-    if (iid) {
-      await stateManager.updateIssueStatus(e.projectSlug, rs.repoName, Number(iid), 'DONE')
-      // Gọi glab issue close {iid} qua agentRunner
+    const entry = Object.entries(rs.issueToMr ?? {})
+      .find(([, mrIid]) => mrIid === e.mrIid)
+    if (entry) {
+      const iid = Number(entry[0])
+      await stateManager.updateIssueStatus(e.projectSlug, rs.repoName, iid, 'DONE')
+      await closeIssueOnGitLab(iid, ...)
+      await removeWorktree(rs.repoName, checkpoint?.worktreePath)
     }
   }
   // Giữ logic phase4 nếu tất cả issues DONE
@@ -290,415 +215,135 @@ case 'MR_MERGED': {
 }
 ```
 
-**5. Sửa `ISSUE_COMMENT` dispatch handler — xử lý DONE issue**
-
+**`src/orchestrator/index.ts`** — `ISSUE_COMMENT` handler, thêm xử lý DONE/REOPENED:
 ```typescript
-case 'ISSUE_COMMENT': {
-  // Kiểm tra issue status trước
-  const issueStatus = await stateManager.getIssueStatus(e.projectSlug, e.issueIid)
-
-  if (issueStatus === 'DONE' || issueStatus === 'CLOSED') {
-    // Reopen
-    await stateManager.updateIssueStatus(e.projectSlug, repoName, e.issueIid, 'REOPENED')
-    await stateManager.prependToPlannedOrder(e.projectSlug, repoName, e.issueIid)
-    // Nếu đang IMPLEMENTING → trigger ngay
-    if (state.phase === 'IMPLEMENTING') {
-      startImplementationLoop(e.projectSlug).catch(...)
-    }
+const ownerRepo = await stateManager.getIssueOwnerRepo(e.projectSlug, e.issueIid)
+if (ownerRepo) {
+  const issueStatus = stateManager.getIssueStatusInRepo(e.projectSlug, ownerRepo, e.issueIid)
+  if (issueStatus === 'DONE') {
+    await stateManager.updateIssueStatus(e.projectSlug, ownerRepo, e.issueIid, 'REOPENED')
+    await stateManager.prependToPlannedOrder(e.projectSlug, ownerRepo, e.issueIid)
+    if (state.phase === 'IMPLEMENTING') startImplementationLoop(e.projectSlug).catch(...)
     break
   }
-  // ... logic hiện tại
 }
 ```
 
-**6. Thêm `IssueStatus`: `'MR_OPEN' | 'INTERRUPTED' | 'REOPENED'`**
+**`claude-config/skills/implement-issue/SKILL.md`** — thêm Step 8:
+```bash
+glab mr create \
+  --source-branch "$BRANCH" \
+  --target-branch "main" \
+  --title "feat: implement #$ISSUE_IID - $ISSUE_TITLE" \
+  --description "Closes #$ISSUE_IID" \
+  --assignee "@me"
+# Output: MR_IID: {number}
+```
 
 ---
 
----
+## Phần 5 — Checkpoint đơn giản khi hết token
 
-## Phần 5 — Change Request Flow (Agile standard)
+### Cơ chế
 
-Có 4 loại change request, mỗi loại có luồng và cách xử lý khác nhau.
+Khi `error_max_turns` → lưu branch name, mark `INTERRUPTED`. Khi resume → agent đọc git log tự recover.
 
----
+### Thay đổi
 
-### Loại 1 — Code review comment trên MR (phổ biến nhất)
-
-**Trigger**: `MR_REVIEW` event với `action: 'changes_requested'` hoặc `action: 'commented'`
-
-**Luồng**:
-```
-Reviewer comment/changes_requested trên code MR
-  → handleMRReviewEvent → handle-review-changes skill
-  → agent classify từng comment:
-      Blocking   (bug, wrong logic, security issue) → phải fix
-      Non-blocking (style suggestion)               → fix nếu agree, reply nếm không
-      Question                                      → reply giải thích, không cần code
-  → fix code, push lên branch
-  → rebase nếu branch outdated so với main
-  → post comment tóm tắt: "Addressed X comments, skipped Y (với lý do)"
-  → re-request review từ reviewer gốc
-
-Issue status: MR_OPEN (không thay đổi — vẫn chờ merge)
+**`src/agent/runner.ts`** — detect `error_max_turns`:
+```typescript
+} else if (message.type === 'result' && message.subtype === 'error_max_turns') {
+  interrupted = true
+}
+// AgentRunResult thêm: interrupted: boolean
 ```
 
-**MR status cycle**:
-```
-MR_OPEN → CHANGES_REQUESTED → MR_OPEN (sau khi agent fix) → ... → MR_APPROVED → MERGED
-```
-
-**Iteration guard**: Thêm `reviewCycles: number` vào checkpoint. Nếu vượt quá **5 vòng** mà MR vẫn chưa approved:
-- Agent post comment: "⚠️ Reached maximum review cycles. Manual intervention required."
-- Dừng tự động xử lý MR đó
-
-**Thay đổi cần làm**:
-
-- `handle-review-changes` skill: thêm bước classify (blocking/non-blocking/question) trước khi fix
-- `handle-review-changes` skill: sau khi push → `glab mr request-review --reviewer {reviewer}` để re-notify
-- `handle-review-changes` skill: thêm bước kiểm tra `git log origin/main..HEAD` — nếu branch lạc hậu → rebase trước khi push
-- `StateManager`: thêm `reviewCycles: number` trong checkpoint data
-- `handleMRReviewEvent`: tăng `reviewCycles` mỗi lần xử lý changes_requested, check guard
-
----
-
-### Loại 2 — Change request khi task đang IN_PROGRESS
-
-**Trigger**: `ISSUE_COMMENT` event, issue status = `IN_PROGRESS`
-
-**Nguyên tắc**: Không interrupt giữa chừng — ghi nhận, xử lý khi có cơ hội.
-
-**Luồng**:
-```
-Comment vào issue khi status = IN_PROGRESS
-  → orchestrator ghi nhận comment vào checkpoint context (pending_comments[])
-  → KHÔNG trigger agent run ngay
-
-Khi agent run hiện tại kết thúc (hoặc checkpoint):
-  → orchestrator inject pending_comments vào system prompt của lần run tiếp
-  → agent đọc và xử lý:
-      Scope nhỏ   → incorporate vào current branch, update acceptance criteria
-      Scope lớn   → hoàn thành task hiện tại trước, reply: "Will create follow-up issue"
-                    → sau khi MR merged, tạo new issue liên kết
-      Clarification → ghi nhận, tiếp tục implement
-```
-
-**Thay đổi cần làm**:
-
-- `StateManager`: thêm `pendingComments: Array<{body, author, createdAt}>` trong checkpoint data
-- `startImplementationLoop`: trước khi run agent, đọc `pendingComments` và thêm vào system prompt
-- `ISSUE_COMMENT` handler trong dispatch: nếu issue `IN_PROGRESS` → append vào `pendingComments`, không trigger agent
-
----
-
-### Loại 3 — Change request sau khi DONE (MR đã merge)
-
-**Trigger**: `ISSUE_COMMENT` event, issue status = `DONE`
-
-**Luồng**:
-```
-Comment vào issue khi status = DONE
-  → agent classify intent từ nội dung comment:
-
-  Bug fix (nhỏ, isolated):
-    → reopen issue (status = REOPENED)
-    → tạo branch MỚI từ main (KHÔNG từ branch cũ đã merge)
-    → implement fix → tạo MR mới
-    → close issue khi MR merge
-
-  Enhancement / new feature (scope lớn):
-    → KHÔNG reopen issue cũ (giữ history sạch)
-    → tạo NEW issue với title/description từ comment
-    → link với issue gốc: "Related to #N"
-    → thêm vào planned queue với priority phù hợp
-    → reply trên issue gốc: "Created #M to track this enhancement"
-
-  Question / clarification:
-    → chỉ reply, không tạo branch hay issue mới
-```
-
-**Quy tắc phân loại** (agent tự classify):
-- Mention "bug", "broken", "error", "wrong", "fix" → Bug fix
-- Mention "add", "new feature", "improve", "enhance", "should also" → Enhancement
-- Câu hỏi (dấu `?`, "how", "why", "what") → Question
-
-**Thay đổi cần làm**:
-
-- `ISSUE_COMMENT` dispatch handler: phân nhánh theo classify thay vì reopen tự động
-- Thêm classify skill/prompt trước khi quyết định action
-- `implement-issue` skill: khi issue là `REOPENED`, tạo branch `fix/issue-{iid}-{slug}` thay vì `feature/`
-
----
-
-### Loại 4 — Branch conflict khi merge (outdated branch)
-
-**Trigger**: Agent phát hiện khi chuẩn bị push hoặc tạo MR
-
-**Luồng**:
-```
-Trước khi push (trong implement-issue hoặc handle-review-changes):
-  → git fetch origin && git log origin/main..HEAD --oneline
-  → nếu branch diverged (có commit mới trên main không có trên branch):
-      → git rebase origin/main
-      → nếu rebase thành công → push --force-with-lease
-      → nếu có conflict:
-          File infra/config (go.mod, package.json, migrations) → ưu tiên main
-          File business logic (src/, tests/)                   → ưu tiên feature branch
-          File không rõ ràng → post comment mô tả conflict, dừng, chờ manual
-```
-
-**Thay đổi cần làm**:
-
-- `implement-issue` skill Step 6: thêm rebase check trước `git push`
-- `handle-review-changes` skill Step 5: thêm rebase check trước `git push`
-- Cả hai skill: nếu conflict không tự resolve được → `glab mr note {mrIid} --message "⚠️ Rebase conflict in {files}. Manual resolution required."`
-
----
-
-### Tổng hợp thay đổi cho Phần 5
-
-**Thêm vào `IssueStatus`**: `'CHANGES_REQUESTED'`
-
-**Thêm vào checkpoint data**:
+**`src/state/types.ts`** — thêm interface:
 ```typescript
 interface CheckpointData {
   branch: string
-  gitLog: string
+  worktreePath?: string
   interruptedAt: string
-  reviewCycles: number          // Loại 1
-  pendingComments: Array<{      // Loại 2
-    body: string
-    author: string
-    createdAt: string
-  }>
 }
 ```
 
-**Thêm vào `repo_state`**: không cần cột mới — `checkpoints` column (Phần 3) đã đủ chứa data trên.
+**DB migration** — thêm cột `checkpoints TEXT NOT NULL DEFAULT '{}'` vào `repo_state`
 
-**Sửa `handle-review-changes` skill**:
-- Bước classify comment (blocking / non-blocking / question)
-- Bước rebase check
-- Bước re-request review
-- Guard check `reviewCycles`
+**`src/state/manager.ts`** — thêm:
+- `saveCheckpoint(slug, repoName, iid, data: CheckpointData)`
+- `getCheckpoint(slug, repoName, iid): CheckpointData | null`
 
-**Sửa `implement-issue` skill**:
-- Bước rebase check trước push (Step 6)
-- Branch prefix `fix/` thay vì `feature/` khi issue là `REOPENED`
+**`src/orchestrator/phase2-implement.ts`** — khi `result.interrupted`:
+```typescript
+const branch = execSync('git branch --show-current', { cwd: worktreePath }).toString().trim()
+await stateManager.saveCheckpoint(projectSlug, targetRepo.name, nextIid, {
+  branch, worktreePath, interruptedAt: new Date().toISOString()
+})
+await stateManager.updateIssueStatus(projectSlug, docsRepo.name, nextIid, 'INTERRUPTED')
+```
+
+Khi resume (issue `INTERRUPTED`), inject vào system prompt:
+```
+Previously interrupted on branch: feature/issue-5-auth
+Resume from where you left off. Run: git log --oneline -10 to see what was done.
+```
 
 ---
 
-## Thay đổi DB tổng hợp
+## Phần 6 — Fix mr.ts bot username
 
-Tất cả thay đổi schema cần được thực hiện bằng migration trong `src/db/index.ts`:
+**`src/webhook/handlers/mr.ts`** — đồng bộ với `note.ts`:
+```typescript
+const botUsername = process.env['GITLAB_BOT_USERNAME']
+if (!botUsername) {
+  log.error('GITLAB_BOT_USERNAME is not set — refusing to process MR events')
+  return
+}
+```
+
+---
+
+## DB migrations tổng hợp
 
 ```sql
--- project_group_state
 ALTER TABLE project_group_state ADD COLUMN docs_mr_iid INTEGER;
-
--- repo_state
-ALTER TABLE repo_state ADD COLUMN planned_order   TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE repo_state ADD COLUMN issue_to_mr     TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE repo_state ADD COLUMN checkpoints     TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE repo_state ADD COLUMN planned_order  TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE repo_state ADD COLUMN issue_to_mr    TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE repo_state ADD COLUMN checkpoints    TEXT NOT NULL DEFAULT '{}';
 ```
 
 ---
 
 ## Danh sách file cần thay đổi
 
-| File | Loại thay đổi |
-|------|--------------|
-| `src/state/types.ts` | Thêm phases `PLANNING`, statuses `MR_OPEN / INTERRUPTED / REOPENED / CHANGES_REQUESTED` |
-| `src/state/manager.ts` | Thêm methods: `setDocsMrIid`, `setPlannedOrder`, `getNextPlannedIssue`, `setIssueMr`, `saveCheckpoint`, `getCheckpoint`, `prependToPlannedOrder`, `appendPendingComment` |
-| `src/db/index.ts` | Migration thêm 4 cột mới |
-| `src/orchestrator/index.ts` | Sửa `MR_REVIEW` handler (docs MR detect + review cycle guard), `MR_MERGED` handler (close issue), `ISSUE_COMMENT` handler (classify: reopen / new issue / pending comment) |
-| `src/orchestrator/phase1-init.ts` | Parse `MR_IID` từ agent output, gọi `setDocsMrIid` |
-| `src/orchestrator/phase2-implement.ts` | Parse `MR_IID` sau run, dùng `getNextPlannedIssue`, xử lý `interrupted`, inject `pendingComments`, không mark `DONE` |
-| `src/orchestrator/phase2-plan.ts` | **Tạo mới** — dependency graph + topological sort + `setPlannedOrder` |
-| `src/orchestrator/phase3-review.ts` | Thêm review cycle guard, không mark `DONE` khi agent xong |
-| `src/agent/runner.ts` | Detect `error_max_turns`, thêm `interrupted` vào `AgentRunResult` |
-| `src/webhook/handlers/mr.ts` | Require `GITLAB_BOT_USERNAME` |
-| `claude-config/skills/implement-issue/SKILL.md` | Thêm Step 8: tạo MR + output `MR_IID:`, rebase check trước push, branch prefix `fix/` khi REOPENED |
-| `claude-config/skills/handle-review-changes/SKILL.md` | Thêm classify step, rebase check, re-request review, iteration guard |
+| File | Thay đổi |
+|------|---------|
+| `src/state/types.ts` | Thêm `PLANNING`, `MR_OPEN`, `INTERRUPTED`, `REOPENED`, `CheckpointData` |
+| `src/state/manager.ts` | Thêm 7 methods mới |
+| `src/db/index.ts` | Migration 4 cột mới |
+| `src/config/schema.ts` | Thêm `workspace_path` (thay env var) |
+| `src/utils/worktree.ts` | **Tạo mới** — createWorktree, removeWorktree |
+| `src/agent/runner.ts` | Detect `error_max_turns`, thêm `interrupted` vào result |
+| `src/orchestrator/index.ts` | Sửa MR_REVIEW, MR_MERGED, ISSUE_COMMENT handlers |
+| `src/orchestrator/phase1-init.ts` | Parse và lưu docs MR IID |
+| `src/orchestrator/phase2-plan.ts` | **Tạo mới** — priority sort, setPlannedOrder |
+| `src/orchestrator/phase2-implement.ts` | Dùng worktree, getNextPlannedIssue, checkpoint, parse MR_IID |
+| `src/webhook/handlers/mr.ts` | Require GITLAB_BOT_USERNAME |
+| `claude-config/skills/implement-issue/SKILL.md` | Thêm Step 8: tạo MR |
 
 ---
 
----
+## Thứ tự implement
 
-## Phần 6 — Parallel task execution với Git Worktrees
-
-### Vấn đề kép
-
-**Vấn đề 1**: Nhiều tasks cùng repo → git conflict do dùng chung directory.
-
-**Vấn đề 2**: Flat structure hỗn loạn khi có nhiều repos + nhiều worktrees:
-```
-/workspace/
-  backend/
-  backend-issue-5/      ← worktree
-  backend-issue-7/      ← worktree
-  frontend/
-  frontend-issue-12/    ← worktree
-  backend-common/
-  backend-common-issue-3/ ← worktree
-  docs/
-  ...                   ← không biết cái nào là gốc, cái nào là task
-```
-Agent nhìn vào không biết đọc cái nào, ghi vào cái nào.
-
-### Giải pháp: Tách `repos/` và `tasks/`
-
-```
-/workspace/
-  repos/                     ← main branch, READ-ONLY cho agents
-    docs/
-    backend/
-    frontend/
-    backend-common/
-  tasks/                     ← active worktrees, mỗi task 1 directory
-    5-backend/               ← worktree issue #5 → repo backend
-    7-frontend/              ← worktree issue #7 → repo frontend
-    9-backend-common/        ← worktree issue #9 → repo backend-common
-```
-
-**Quy tắc bất biến**:
-- `repos/` = source of truth, luôn là main branch, agent chỉ được **đọc**
-- `tasks/` = nơi agent **ghi**, mỗi issue một directory riêng biệt
-
-### Tạo worktree đúng cách
-
-```bash
-# Tạo worktree từ repo gốc trong repos/
-git -C /workspace/repos/backend \
-  worktree add /workspace/tasks/5-backend \
-  -b feature/issue-5-auth \
-  origin/main
-
-# Agent chạy với cwd = /workspace/tasks/5-backend
-# Cleanup sau khi MR merged:
-git -C /workspace/repos/backend worktree remove /workspace/tasks/5-backend
-```
-
-### System prompt cho agent (rõ ràng, không nhầm lẫn)
-
-```
-Working directory (your write target): /workspace/tasks/5-backend
-
-Read-only references (DO NOT commit to these):
-  docs:           /workspace/repos/docs
-  backend-common: /workspace/repos/backend-common
-  frontend:       /workspace/repos/frontend
-```
-
-Agent không cần đoán — được nói thẳng cái nào đọc, cái nào ghi.
-
-### Lifecycle của một worktree
-
-```
-Planning phase chọn issue #5 (backend)
-  → git fetch + sync repos/backend với origin/main
-  → git worktree add /workspace/tasks/5-backend -b feature/issue-5 origin/main
-  → lưu worktreePath = '/workspace/tasks/5-backend' vào checkpoint
-  → agentRunner.run({ cwd: '/workspace/tasks/5-backend' })
-
-Agent run xong
-  → push branch từ worktree
-  → tạo MR
-  → updateIssueStatus('MR_OPEN')
-  → (worktree vẫn còn, chờ MR review/merge)
-
-MR_MERGED
-  → updateIssueStatus('DONE')
-  → git worktree remove /workspace/tasks/5-backend
-  → sync repos/backend: git -C /workspace/repos/backend pull --ff-only origin/main
-  → unblock dependent tasks nếu có
-```
-
-### Sync `repos/` sau khi MR merge
-
-Quan trọng: nếu task #5 (backend-common) merge xong, task #9 (backend, phụ thuộc #5) cần thấy code mới trong `repos/backend-common`:
-
-```typescript
-async function syncMainBranch(repoName: string): Promise<void> {
-  const repoPath = path.join(workspacePath, 'repos', repoName)
-  execSync('git pull --ff-only origin main', { cwd: repoPath })
-}
-
-// Gọi sau mỗi MR_MERGED trước khi unblock dependent tasks
-```
-
-### Concurrency control
-
-```typescript
-// src/config/schema.ts
-agent: {
-  max_parallel_tasks: number  // default: 3
-}
-```
-
-```typescript
-// startImplementationLoop — parallel batch
-while (true) {
-  const readyIssues = await getReadyIssues(projectSlug, maxParallelTasks)
-  if (readyIssues.length === 0) break
-
-  await Promise.allSettled(
-    readyIssues.map(iid => implementIssue(projectSlug, iid))
-  )
-  // Loop lại — check xem có dependency mới được unlock không
-}
-```
-
-`getReadyIssues`: trả về issues có status `OPEN` hoặc `INTERRUPTED`, tất cả dependencies đã `DONE`, chưa có worktree active.
-
-### Thay đổi cần làm
-
-**1. Config** — thêm `workspace_path` rõ ràng vào config (thay vì env var `WORKSPACE_PATH`) và `max_parallel_tasks`
-
-**2. `src/utils/repo-setup.ts`** hoặc file mới `src/utils/worktree.ts`:
-- `createWorktree(repoName, issueIid, branch): string` — tạo trong `tasks/`, trả về path
-- `removeWorktree(repoName, worktreePath)` — cleanup
-- `syncMainBranch(repoName)` — pull origin/main vào `repos/{name}`
-- `validateWorktrees(projectSlug)` — scan orphaned worktrees khi startup
-
-**3. `src/state/types.ts`** — thêm `worktreePath?: string` vào `CheckpointData`
-
-**4. `src/orchestrator/phase2-implement.ts`**:
-- Dùng `createWorktree` thay vì `local_path` trực tiếp
-- `startImplementationLoop` dùng `Promise.allSettled`
-- System prompt bao gồm read-only references với paths từ `repos/`
-- Cleanup worktree sau MR merge
-
-**5. `src/orchestrator/index.ts`** — `MR_MERGED` handler: gọi `syncMainBranch` sau cleanup worktree
-
-**6. `src/index.ts`** — khi startup: gọi `validateWorktrees` để recover orphaned worktrees
-
----
-
-## Thứ tự implement đề xuất
-
-**Nhóm 1 — Nền tảng**
-1. DB migration + `types.ts` (thêm phases/statuses/worktreePath mới)
+1. DB migration + `types.ts`
 2. `StateManager` methods mới
-3. `AgentRunner` detect `error_max_turns`
-4. `src/config/schema.ts` — thêm `max_parallel_tasks`
-
-**Nhóm 2 — Core flow**
-5. `phase2-plan.ts` — planning logic (dependency graph + topological sort + `getReadyIssues`)
-6. Sửa `phase1-init.ts` — lưu docs MR IID
-7. Sửa `dispatch` — trigger từ docs MR approved, bỏ "approve" comment
-8. Sửa `startImplementationLoop` — worktree per task, `Promise.allSettled`, inject pending comments, parse MR_IID
-
-**Nhóm 3 — Task lifecycle**
-9. Sửa `MR_MERGED` handler — close issue + cleanup worktree
-10. Sửa `ISSUE_COMMENT` handler — classify intent (bug/enhancement/question)
-
-**Nhóm 4 — Change request flow**
-11. Sửa `implement-issue` skill — Step 8 tạo MR, rebase check, fix/ prefix
-12. Sửa `handle-review-changes` skill — classify, rebase, re-request review, cycle guard
-13. Sửa `phase3-review.ts` — review cycle tracking
-14. Fix `mr.ts` — require bot username
-
-**Nhóm 5 — Reliability**
-15. Worktree cleanup khi server restart (scan orphaned worktrees)
-16. `plan-image-attachments.md` — implement sau cùng
+3. `src/utils/worktree.ts`
+4. `AgentRunner` detect `error_max_turns`
+5. `phase1-init.ts` — lưu docs MR IID
+6. `phase2-plan.ts` — priority sort
+7. `dispatch` — trigger từ docs MR approved
+8. `phase2-implement.ts` — worktree + planned order + checkpoint + parse MR_IID
+9. `MR_MERGED` handler — close issue + cleanup worktree
+10. `ISSUE_COMMENT` handler — reopen
+11. `implement-issue` skill — Step 8 tạo MR
+12. Fix `mr.ts`
