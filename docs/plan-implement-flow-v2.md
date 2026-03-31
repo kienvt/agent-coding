@@ -527,113 +527,151 @@ ALTER TABLE repo_state ADD COLUMN checkpoints     TEXT NOT NULL DEFAULT '{}';
 
 ## Phần 6 — Parallel task execution với Git Worktrees
 
-### Vấn đề
+### Vấn đề kép
 
-Hiện tại mỗi code repo có **một directory duy nhất** (vd. `/workspace/backend`).
-Nếu chạy nhiều tasks song song:
-- Task A `git checkout feature/issue-5`
-- Task B `git checkout feature/issue-7` → **conflict, overwrite task A**
+**Vấn đề 1**: Nhiều tasks cùng repo → git conflict do dùng chung directory.
 
-### Giải pháp: Git Worktrees
+**Vấn đề 2**: Flat structure hỗn loạn khi có nhiều repos + nhiều worktrees:
+```
+/workspace/
+  backend/
+  backend-issue-5/      ← worktree
+  backend-issue-7/      ← worktree
+  frontend/
+  frontend-issue-12/    ← worktree
+  backend-common/
+  backend-common-issue-3/ ← worktree
+  docs/
+  ...                   ← không biết cái nào là gốc, cái nào là task
+```
+Agent nhìn vào không biết đọc cái nào, ghi vào cái nào.
 
-`git worktree` tạo nhiều working directory độc lập từ cùng một git repo, mỗi directory checkout một branch riêng mà không ảnh hưởng nhau.
+### Giải pháp: Tách `repos/` và `tasks/`
+
+```
+/workspace/
+  repos/                     ← main branch, READ-ONLY cho agents
+    docs/
+    backend/
+    frontend/
+    backend-common/
+  tasks/                     ← active worktrees, mỗi task 1 directory
+    5-backend/               ← worktree issue #5 → repo backend
+    7-frontend/              ← worktree issue #7 → repo frontend
+    9-backend-common/        ← worktree issue #9 → repo backend-common
+```
+
+**Quy tắc bất biến**:
+- `repos/` = source of truth, luôn là main branch, agent chỉ được **đọc**
+- `tasks/` = nơi agent **ghi**, mỗi issue một directory riêng biệt
+
+### Tạo worktree đúng cách
 
 ```bash
-# Trước khi start task, tạo worktree riêng:
-git -C /workspace/backend worktree add \
-  /workspace/backend-issue-5 \
+# Tạo worktree từ repo gốc trong repos/
+git -C /workspace/repos/backend \
+  worktree add /workspace/tasks/5-backend \
   -b feature/issue-5-auth \
   origin/main
 
-# Agent chạy trong /workspace/backend-issue-5 thay vì /workspace/backend
-# Sau khi MR merged, cleanup:
-git -C /workspace/backend worktree remove /workspace/backend-issue-5
+# Agent chạy với cwd = /workspace/tasks/5-backend
+# Cleanup sau khi MR merged:
+git -C /workspace/repos/backend worktree remove /workspace/tasks/5-backend
 ```
 
-### Kiến trúc thay đổi
+### System prompt cho agent (rõ ràng, không nhầm lẫn)
 
-**Worktree path convention**:
 ```
-{workspace}/{repo-name}-issue-{iid}/
-```
-Ví dụ: `/workspace/backend-issue-5`, `/workspace/frontend-issue-12`
+Working directory (your write target): /workspace/tasks/5-backend
 
-**Lifecycle của một worktree**:
+Read-only references (DO NOT commit to these):
+  docs:           /workspace/repos/docs
+  backend-common: /workspace/repos/backend-common
+  frontend:       /workspace/repos/frontend
 ```
-startImplementationLoop chọn issue
-  → git worktree add {worktreePath} -b {branch} origin/main
-  → lưu worktreePath vào state (checkpoint)
-  → agentRunner.run({ cwd: worktreePath })
-  → agent push branch từ worktree
+
+Agent không cần đoán — được nói thẳng cái nào đọc, cái nào ghi.
+
+### Lifecycle của một worktree
+
+```
+Planning phase chọn issue #5 (backend)
+  → git fetch + sync repos/backend với origin/main
+  → git worktree add /workspace/tasks/5-backend -b feature/issue-5 origin/main
+  → lưu worktreePath = '/workspace/tasks/5-backend' vào checkpoint
+  → agentRunner.run({ cwd: '/workspace/tasks/5-backend' })
+
+Agent run xong
+  → push branch từ worktree
+  → tạo MR
   → updateIssueStatus('MR_OPEN')
+  → (worktree vẫn còn, chờ MR review/merge)
 
-MR_MERGED event
+MR_MERGED
   → updateIssueStatus('DONE')
-  → git worktree remove {worktreePath}   ← cleanup
-  → xóa worktreePath khỏi state
+  → git worktree remove /workspace/tasks/5-backend
+  → sync repos/backend: git -C /workspace/repos/backend pull --ff-only origin/main
+  → unblock dependent tasks nếu có
+```
+
+### Sync `repos/` sau khi MR merge
+
+Quan trọng: nếu task #5 (backend-common) merge xong, task #9 (backend, phụ thuộc #5) cần thấy code mới trong `repos/backend-common`:
+
+```typescript
+async function syncMainBranch(repoName: string): Promise<void> {
+  const repoPath = path.join(workspacePath, 'repos', repoName)
+  execSync('git pull --ff-only origin main', { cwd: repoPath })
+}
+
+// Gọi sau mỗi MR_MERGED trước khi unblock dependent tasks
 ```
 
 ### Concurrency control
 
-Không nên chạy vô hạn tasks song song — giới hạn theo config:
-
 ```typescript
-// src/config/schema.ts — thêm field:
+// src/config/schema.ts
 agent: {
   max_parallel_tasks: number  // default: 3
 }
 ```
 
-Trong `startImplementationLoop`, thay vì sequential loop:
-
 ```typescript
-// Lấy N tasks có thể implement (không có unmet dependency)
-const readyIssues = await getReadyIssues(projectSlug, maxParallel)
+// startImplementationLoop — parallel batch
+while (true) {
+  const readyIssues = await getReadyIssues(projectSlug, maxParallelTasks)
+  if (readyIssues.length === 0) break
 
-// Chạy song song với Promise.allSettled
-await Promise.allSettled(
-  readyIssues.map(iid => implementIssue(projectSlug, iid))
-)
-
-// Sau khi batch xong, check lại — các dependency đã unlock tasks mới chưa
-// Loop tiếp cho đến khi hết tasks
+  await Promise.allSettled(
+    readyIssues.map(iid => implementIssue(projectSlug, iid))
+  )
+  // Loop lại — check xem có dependency mới được unlock không
+}
 ```
 
-### Cần đảm bảo main branch sạch trước khi tạo worktree
-
-```bash
-# Trước khi tạo worktree:
-git -C {repoPath} fetch origin
-git -C {repoPath} merge --ff-only origin/main  # cập nhật main local
-```
-
-Nếu local main diverged (có commit local chưa push) → log warning, vẫn tạo worktree từ `origin/main` trực tiếp.
+`getReadyIssues`: trả về issues có status `OPEN` hoặc `INTERRUPTED`, tất cả dependencies đã `DONE`, chưa có worktree active.
 
 ### Thay đổi cần làm
 
-**1. `src/state/types.ts`** — thêm `worktreePath?: string` vào `CheckpointData`
+**1. Config** — thêm `workspace_path` rõ ràng vào config (thay vì env var `WORKSPACE_PATH`) và `max_parallel_tasks`
 
-**2. `src/orchestrator/phase2-implement.ts`**:
-- Hàm `createWorktree(repoPath, issueIid, branch): string` — tạo worktree, trả về path
-- Hàm `removeWorktree(repoPath, worktreePath)` — cleanup
-- `startImplementationLoop` dùng `Promise.allSettled` thay vì sequential
-- Pass `worktreePath` làm `cwd` cho `agentRunner.run`
+**2. `src/utils/repo-setup.ts`** hoặc file mới `src/utils/worktree.ts`:
+- `createWorktree(repoName, issueIid, branch): string` — tạo trong `tasks/`, trả về path
+- `removeWorktree(repoName, worktreePath)` — cleanup
+- `syncMainBranch(repoName)` — pull origin/main vào `repos/{name}`
+- `validateWorktrees(projectSlug)` — scan orphaned worktrees khi startup
 
-**3. `src/config/schema.ts`** — thêm `max_parallel_tasks` (default 3)
+**3. `src/state/types.ts`** — thêm `worktreePath?: string` vào `CheckpointData`
 
-**4. `MR_MERGED` handler** — sau khi close issue, gọi `removeWorktree`
+**4. `src/orchestrator/phase2-implement.ts`**:
+- Dùng `createWorktree` thay vì `local_path` trực tiếp
+- `startImplementationLoop` dùng `Promise.allSettled`
+- System prompt bao gồm read-only references với paths từ `repos/`
+- Cleanup worktree sau MR merge
 
-**5. `src/orchestrator/phase2-plan.ts`** — `getReadyIssues(slug, limit)`: trả về issues có thể implement ngay (dependencies met, status OPEN/INTERRUPTED, chưa có worktree active)
+**5. `src/orchestrator/index.ts`** — `MR_MERGED` handler: gọi `syncMainBranch` sau cleanup worktree
 
-### Cleanup khi server restart
-
-Khi server khởi động lại, các worktree cũ vẫn còn trên disk. Cần:
-```typescript
-// src/index.ts hoặc startOrchestrator():
-// Scan tất cả checkpoints có worktreePath
-// Verify worktree còn valid (git worktree list)
-// Nếu không valid → xóa khỏi state, mark issue INTERRUPTED để retry
-```
+**6. `src/index.ts`** — khi startup: gọi `validateWorktrees` để recover orphaned worktrees
 
 ---
 
