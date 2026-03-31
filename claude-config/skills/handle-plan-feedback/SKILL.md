@@ -41,7 +41,7 @@ If the feedback results in new or removed tasks, update `docs/implementation-pla
 Use the `/commit` command:
 
 ```
-Message: "docs: address plan feedback from @$AUTHOR_USERNAME"
+Message: "docs: address plan feedback from @{authorUsername}"
 ```
 
 ```bash
@@ -50,10 +50,12 @@ git push origin docs/init-plan
 
 ## Step 5 — Reply on the issue
 
-```bash
-glab issue note $ISSUE_IID --message "✅ Feedback addressed: [brief 1-2 sentence summary of changes made]
+Use the `issueIid` value from the arguments above:
 
-@$AUTHOR_USERNAME — please review the updated documents and comment **'approve'** when ready."
+```bash
+glab issue note {issueIid} --message "✅ Feedback addressed: [brief 1-2 sentence summary of changes made]
+
+@{authorUsername} — please review the updated documents and comment **'approve'** when ready."
 ```
 
 If no document changes were needed (pure clarification), reply directly without a commit.
