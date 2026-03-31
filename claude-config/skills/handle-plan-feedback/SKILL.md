@@ -48,7 +48,28 @@ Message: "docs: address plan feedback from @{authorUsername}"
 git push origin docs/init-plan
 ```
 
-## Step 5 — Reply on the issue
+## Step 5 — Ensure Merge Request exists
+
+Check if an open MR already exists for this branch:
+
+```bash
+glab mr list --source-branch docs/init-plan --state opened
+```
+
+- If **no MR exists** → create one:
+
+```bash
+glab mr create \
+  --source-branch "docs/init-plan" \
+  --target-branch "main" \
+  --title "docs: update planning documents based on feedback" \
+  --description "Updated planning documents addressing feedback from @{authorUsername}." \
+  --assignee "@me"
+```
+
+- If **MR already exists** → no action needed (new commit is already reflected in the MR).
+
+## Step 6 — Reply on the issue
 
 Use the `issueIid` value from the arguments above:
 
@@ -58,4 +79,4 @@ glab issue note {issueIid} --message "✅ Feedback addressed: [brief 1-2 sentenc
 @{authorUsername} — please review the updated documents and comment **'approve'** when ready."
 ```
 
-If no document changes were needed (pure clarification), reply directly without a commit.
+If no document changes were needed (pure clarification), skip Steps 4–5 and reply directly.
