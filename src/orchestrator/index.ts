@@ -38,7 +38,7 @@ async function dispatch(event: AgentEvent): Promise<void> {
       }
 
       if (state.phase === 'AWAITING_REVIEW') {
-        if (e.body?.toLowerCase().includes('approve')) {
+        if (e.body?.toLowerCase()?.includes('approve')) {
           log.info({ projectSlug: e.projectSlug }, 'Plan approved — starting Phase 2')
           await stateManager.transitionGroupPhase(e.projectSlug, 'IMPLEMENTING')
           // Run in background (non-blocking)
