@@ -146,4 +146,7 @@ export async function handlePlanFeedback(
     cwd: docsRepoAbsPath,
     projectSlug: event.projectSlug,
   })
+
+  await stateManager.transitionGroupPhase(event.projectSlug, 'AWAITING_REVIEW')
+  log.info({ projectSlug: event.projectSlug }, 'Plan feedback handled — back to AWAITING_REVIEW')
 }

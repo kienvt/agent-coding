@@ -19,7 +19,11 @@ interface NotePayload {
 }
 
 export async function handleNoteEvent(payload: NotePayload): Promise<void> {
-  const botUsername = process.env['GITLAB_BOT_USERNAME'] ?? 'ai-agent'
+  const botUsername = process.env['GITLAB_BOT_USERNAME']
+  if (!botUsername) {
+    log.error('GITLAB_BOT_USERNAME is not set — refusing to process note events to prevent infinite loops')
+    return
+  }
 
   if (payload.user.username === botUsername) {
     log.info({ username: payload.user.username }, 'Ignoring bot comment')
