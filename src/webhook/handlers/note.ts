@@ -13,7 +13,8 @@ interface NotePayload {
     noteable_type: 'Issue' | 'MergeRequest'
     noteable_iid: number
     id: number
-    body: string
+    body?: string
+    note?: string  // older GitLab versions use 'note' instead of 'body'
   }
 }
 
@@ -35,12 +36,16 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
 
   const { projectSlug } = resolved
   const gitlabProjectId = payload.project.id
-  const { noteable_type, noteable_iid, id: noteId, body } = payload.object_attributes
+  const { noteable_type, noteable_iid, id: noteId, body, note } = payload.object_attributes
+  const commentBody = body ?? note
 
-  log.info({ projectSlug, noteable_type, issueIid: noteable_iid, hasBody: !!body }, 'Note resolved')
+  log.info(
+    { projectSlug, noteable_type, issueIid: noteable_iid, hasBody: !!body, hasNote: !!note },
+    'Note resolved',
+  )
 
-  if (!body) {
-    log.warn({ projectSlug, noteable_type }, 'Note has no body — ignoring')
+  if (!commentBody) {
+    log.warn({ projectSlug, noteable_type, objKeys: Object.keys(payload.object_attributes) }, 'Note has no body — ignoring')
     return
   }
 
@@ -57,7 +62,7 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
       issueIid: noteable_iid,
       noteId,
       authorUsername: payload.user.username,
-      body,
+      body: commentBody,
     })
     log.info({ projectSlug, issueIid: noteable_iid }, 'ISSUE_COMMENT enqueued')
   } else if (noteable_type === 'MergeRequest') {
@@ -68,7 +73,7 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
       mrIid: noteable_iid,
       action: 'commented',
       authorUsername: payload.user.username,
-      body,
+      body: commentBody,
     })
     log.info({ projectSlug, mrIid: noteable_iid }, 'MR_REVIEW (commented) enqueued')
   }
