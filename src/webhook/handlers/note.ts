@@ -36,6 +36,10 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
   const { projectSlug } = resolved
   const gitlabProjectId = payload.project.id
   const { noteable_type, noteable_iid, id: noteId, body } = payload.object_attributes
+  if (!body) {
+    log.debug({ projectSlug, noteable_type }, 'Note has no body — ignoring')
+    return
+  }
 
   if (noteable_type === 'Issue') {
     await eventQueue.enqueue({
