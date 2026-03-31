@@ -523,25 +523,144 @@ ALTER TABLE repo_state ADD COLUMN checkpoints     TEXT NOT NULL DEFAULT '{}';
 
 ---
 
+---
+
+## Phần 6 — Parallel task execution với Git Worktrees
+
+### Vấn đề
+
+Hiện tại mỗi code repo có **một directory duy nhất** (vd. `/workspace/backend`).
+Nếu chạy nhiều tasks song song:
+- Task A `git checkout feature/issue-5`
+- Task B `git checkout feature/issue-7` → **conflict, overwrite task A**
+
+### Giải pháp: Git Worktrees
+
+`git worktree` tạo nhiều working directory độc lập từ cùng một git repo, mỗi directory checkout một branch riêng mà không ảnh hưởng nhau.
+
+```bash
+# Trước khi start task, tạo worktree riêng:
+git -C /workspace/backend worktree add \
+  /workspace/backend-issue-5 \
+  -b feature/issue-5-auth \
+  origin/main
+
+# Agent chạy trong /workspace/backend-issue-5 thay vì /workspace/backend
+# Sau khi MR merged, cleanup:
+git -C /workspace/backend worktree remove /workspace/backend-issue-5
+```
+
+### Kiến trúc thay đổi
+
+**Worktree path convention**:
+```
+{workspace}/{repo-name}-issue-{iid}/
+```
+Ví dụ: `/workspace/backend-issue-5`, `/workspace/frontend-issue-12`
+
+**Lifecycle của một worktree**:
+```
+startImplementationLoop chọn issue
+  → git worktree add {worktreePath} -b {branch} origin/main
+  → lưu worktreePath vào state (checkpoint)
+  → agentRunner.run({ cwd: worktreePath })
+  → agent push branch từ worktree
+  → updateIssueStatus('MR_OPEN')
+
+MR_MERGED event
+  → updateIssueStatus('DONE')
+  → git worktree remove {worktreePath}   ← cleanup
+  → xóa worktreePath khỏi state
+```
+
+### Concurrency control
+
+Không nên chạy vô hạn tasks song song — giới hạn theo config:
+
+```typescript
+// src/config/schema.ts — thêm field:
+agent: {
+  max_parallel_tasks: number  // default: 3
+}
+```
+
+Trong `startImplementationLoop`, thay vì sequential loop:
+
+```typescript
+// Lấy N tasks có thể implement (không có unmet dependency)
+const readyIssues = await getReadyIssues(projectSlug, maxParallel)
+
+// Chạy song song với Promise.allSettled
+await Promise.allSettled(
+  readyIssues.map(iid => implementIssue(projectSlug, iid))
+)
+
+// Sau khi batch xong, check lại — các dependency đã unlock tasks mới chưa
+// Loop tiếp cho đến khi hết tasks
+```
+
+### Cần đảm bảo main branch sạch trước khi tạo worktree
+
+```bash
+# Trước khi tạo worktree:
+git -C {repoPath} fetch origin
+git -C {repoPath} merge --ff-only origin/main  # cập nhật main local
+```
+
+Nếu local main diverged (có commit local chưa push) → log warning, vẫn tạo worktree từ `origin/main` trực tiếp.
+
+### Thay đổi cần làm
+
+**1. `src/state/types.ts`** — thêm `worktreePath?: string` vào `CheckpointData`
+
+**2. `src/orchestrator/phase2-implement.ts`**:
+- Hàm `createWorktree(repoPath, issueIid, branch): string` — tạo worktree, trả về path
+- Hàm `removeWorktree(repoPath, worktreePath)` — cleanup
+- `startImplementationLoop` dùng `Promise.allSettled` thay vì sequential
+- Pass `worktreePath` làm `cwd` cho `agentRunner.run`
+
+**3. `src/config/schema.ts`** — thêm `max_parallel_tasks` (default 3)
+
+**4. `MR_MERGED` handler** — sau khi close issue, gọi `removeWorktree`
+
+**5. `src/orchestrator/phase2-plan.ts`** — `getReadyIssues(slug, limit)`: trả về issues có thể implement ngay (dependencies met, status OPEN/INTERRUPTED, chưa có worktree active)
+
+### Cleanup khi server restart
+
+Khi server khởi động lại, các worktree cũ vẫn còn trên disk. Cần:
+```typescript
+// src/index.ts hoặc startOrchestrator():
+// Scan tất cả checkpoints có worktreePath
+// Verify worktree còn valid (git worktree list)
+// Nếu không valid → xóa khỏi state, mark issue INTERRUPTED để retry
+```
+
+---
+
 ## Thứ tự implement đề xuất
 
-**Nhóm 1 — Nền tảng (không phụ thuộc nhau, làm trước)**
-1. DB migration + `types.ts` (thêm phases/statuses mới)
+**Nhóm 1 — Nền tảng**
+1. DB migration + `types.ts` (thêm phases/statuses/worktreePath mới)
 2. `StateManager` methods mới
 3. `AgentRunner` detect `error_max_turns`
+4. `src/config/schema.ts` — thêm `max_parallel_tasks`
 
 **Nhóm 2 — Core flow**
-4. `phase2-plan.ts` — planning logic (dependency graph + topological sort)
-5. Sửa `phase1-init.ts` — lưu docs MR IID
-6. Sửa `dispatch` — trigger từ docs MR approved, bỏ "approve" comment
-7. Sửa `startImplementationLoop` — dùng planned order, xử lý interrupted, inject pending comments, parse MR_IID
+5. `phase2-plan.ts` — planning logic (dependency graph + topological sort + `getReadyIssues`)
+6. Sửa `phase1-init.ts` — lưu docs MR IID
+7. Sửa `dispatch` — trigger từ docs MR approved, bỏ "approve" comment
+8. Sửa `startImplementationLoop` — worktree per task, `Promise.allSettled`, inject pending comments, parse MR_IID
 
 **Nhóm 3 — Task lifecycle**
-8. Sửa `MR_MERGED` handler — close issue liên kết
-9. Sửa `ISSUE_COMMENT` handler — classify intent (bug/enhancement/question)
+9. Sửa `MR_MERGED` handler — close issue + cleanup worktree
+10. Sửa `ISSUE_COMMENT` handler — classify intent (bug/enhancement/question)
 
 **Nhóm 4 — Change request flow**
-10. Sửa `implement-issue` skill — Step 8 tạo MR, rebase check, fix/ prefix
-11. Sửa `handle-review-changes` skill — classify, rebase, re-request review, cycle guard
-12. Sửa `phase3-review.ts` — review cycle tracking
-13. Fix `mr.ts` — require bot username
+11. Sửa `implement-issue` skill — Step 8 tạo MR, rebase check, fix/ prefix
+12. Sửa `handle-review-changes` skill — classify, rebase, re-request review, cycle guard
+13. Sửa `phase3-review.ts` — review cycle tracking
+14. Fix `mr.ts` — require bot username
+
+**Nhóm 5 — Reliability**
+15. Worktree cleanup khi server restart (scan orphaned worktrees)
+16. `plan-image-attachments.md` — implement sau cùng
