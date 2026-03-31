@@ -21,7 +21,7 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
   const botUsername = process.env['GITLAB_BOT_USERNAME'] ?? 'ai-agent'
 
   if (payload.user.username === botUsername) {
-    log.debug({ username: payload.user.username }, 'Ignoring bot comment')
+    log.info({ username: payload.user.username }, 'Ignoring bot comment')
     return
   }
 
@@ -29,15 +29,23 @@ export async function handleNoteEvent(payload: NotePayload): Promise<void> {
   const resolved = resolveGitlabProject(payload.project.id, config)
 
   if (!resolved) {
-    log.debug({ gitlabProjectId: payload.project.id }, 'Note: project not configured, ignoring')
+    log.warn({ gitlabProjectId: payload.project.id }, 'Note: project not configured, ignoring')
     return
   }
 
   const { projectSlug } = resolved
   const gitlabProjectId = payload.project.id
   const { noteable_type, noteable_iid, id: noteId, body } = payload.object_attributes
+
+  log.info({ projectSlug, noteable_type, issueIid: noteable_iid, hasBody: !!body }, 'Note resolved')
+
   if (!body) {
-    log.debug({ projectSlug, noteable_type }, 'Note has no body — ignoring')
+    log.warn({ projectSlug, noteable_type }, 'Note has no body — ignoring')
+    return
+  }
+
+  if (noteable_type !== 'Issue' && noteable_type !== 'MergeRequest') {
+    log.warn({ projectSlug, noteable_type }, 'Note: unsupported noteable_type — ignoring')
     return
   }
 
