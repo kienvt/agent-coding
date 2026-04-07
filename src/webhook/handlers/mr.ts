@@ -17,7 +17,11 @@ interface MRPayload {
 }
 
 export async function handleMREvent(payload: MRPayload): Promise<void> {
-  const botUsername = process.env['GITLAB_BOT_USERNAME'] ?? 'ai-agent'
+  const botUsername = process.env['GITLAB_BOT_USERNAME']
+  if (!botUsername) {
+    log.error('GITLAB_BOT_USERNAME is not set — refusing to process MR events')
+    return
+  }
 
   if (payload.user.username === botUsername) {
     log.debug({ username: payload.user.username }, 'Ignoring bot MR action')

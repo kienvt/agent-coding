@@ -128,3 +128,22 @@ glab api "projects/$ISSUE_PROJECT_ID/issues/$ISSUE_IID/notes" \
 
 All acceptance criteria met. Ready for review."
 ```
+
+## Step 8 — Create Merge Request
+
+```bash
+glab mr create \
+  --source-branch "$BRANCH" \
+  --target-branch "main" \
+  --title "feat: implement #$ISSUE_IID - $ISSUE_TITLE" \
+  --description "Closes #$ISSUE_IID" \
+  --assignee "@me"
+```
+
+After creating the MR, output its IID on the **last line** so the orchestrator can track it:
+
+```
+MR_IID: {number}
+```
+
+Replace `{number}` with the actual MR IID returned by `glab mr create`.

@@ -20,6 +20,11 @@ function parseIssueIids(output: string): number[] {
     .filter((n) => !isNaN(n))
 }
 
+function parseMrIid(output: string): number | null {
+  const match = output.match(/MR_IID:\s*(\d+)/i)
+  return match ? parseInt(match[1], 10) : null
+}
+
 export async function handleRequirementPushed(
   event: RequirementPushedEvent,
 ): Promise<void> {
@@ -85,6 +90,13 @@ export async function handleRequirementPushed(
     projectSlug: event.projectSlug,
     onProgress: (msg) => log.debug({ msg: msg.slice(0, 120) }, 'Agent progress'),
   })
+
+  // ── Save docs MR IID if agent output contains one ────────────────────────
+  const docsMrIid = parseMrIid(result.output)
+  if (docsMrIid) {
+    await stateManager.setDocsMrIid(event.projectSlug, docsMrIid)
+    log.info({ projectSlug: event.projectSlug, docsMrIid }, 'Docs MR IID saved')
+  }
 
   // ── Post-run verification ─────────────────────────────────────────────────
   // 1. Ensure the docs branch is pushed to remote (agent push may have failed)

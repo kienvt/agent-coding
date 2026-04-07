@@ -32,6 +32,7 @@ export interface AgentRunResult {
   cost?: number;
   durationMs?: number;
   turns: number;
+  interrupted: boolean;
 }
 
 const DEFAULT_TOOLS = [
@@ -105,6 +106,7 @@ export class AgentRunner {
     let cost: number | undefined;
     let durationMs: number | undefined;
     let turns = 0;
+    let interrupted = false;
 
     try {
       const messages = query({
@@ -153,6 +155,10 @@ export class AgentRunner {
           if (message.subtype === "success") {
             cost = message.total_cost_usd;
             durationMs = Date.now() - startMs;
+          } else if (message.subtype === "error_max_turns") {
+            interrupted = true;
+            durationMs = Date.now() - startMs;
+            log.warn({ cwd, turns }, "Agent hit max turns — marking as interrupted");
           }
         }
       }
@@ -180,7 +186,7 @@ export class AgentRunner {
         });
     }
 
-    return { success: true, output, cost, durationMs, turns };
+    return { success: !interrupted, output, cost, durationMs, turns, interrupted };
   }
 }
 

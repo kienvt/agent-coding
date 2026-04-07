@@ -134,4 +134,20 @@ db.exec(`
     ON agent_logs(project_slug, occurred_at);
 `)
 
+// Add new columns if they don't exist (idempotent migrations)
+const addColumnIfMissing = (table: string, column: string, definition: string) => {
+  const exists = db.prepare(
+    `SELECT COUNT(*) as cnt FROM pragma_table_info('${table}') WHERE name='${column}'`
+  ).get() as { cnt: number } | undefined
+  if (!exists?.cnt) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    log.info(`Migration: added ${table}.${column}`)
+  }
+}
+
+addColumnIfMissing('project_group_state', 'docs_mr_iid', 'INTEGER')
+addColumnIfMissing('repo_state', 'planned_order', "TEXT NOT NULL DEFAULT '[]'")
+addColumnIfMissing('repo_state', 'issue_to_mr', "TEXT NOT NULL DEFAULT '{}'")
+addColumnIfMissing('repo_state', 'checkpoints', "TEXT NOT NULL DEFAULT '{}'")
+
 log.info({ path: DB_PATH }, 'SQLite database ready')

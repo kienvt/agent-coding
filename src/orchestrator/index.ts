@@ -13,6 +13,7 @@ import type {
 } from '../queue/types.js'
 import { getWorkspacePath } from '../utils/repo-setup.js'
 import { handleRequirementPushed, handlePlanFeedback } from './phase1-init.js'
+import { startPlanningPhase } from './phase2-plan.js'
 import { startImplementationLoop, handleIssueCommentDuringImplementation } from './phase2-implement.js'
 import { runPhase3, handleMRReviewEvent } from './phase3-review.js'
 import { runPhase4 } from './phase4-done.js'
@@ -37,17 +38,25 @@ async function dispatch(event: AgentEvent): Promise<void> {
         break
       }
 
-      if (state.phase === 'AWAITING_REVIEW') {
-        if (e.body?.trim().toLowerCase() === 'approve') {
-          log.info({ projectSlug: e.projectSlug }, 'Plan approved — starting Phase 2')
-          await stateManager.transitionGroupPhase(e.projectSlug, 'IMPLEMENTING')
-          // Run in background (non-blocking)
-          startImplementationLoop(e.projectSlug).catch((err) =>
-            log.error({ err, projectSlug: e.projectSlug }, 'Phase 2 loop error'),
-          )
-        } else {
-          await handlePlanFeedback(e, config)
+      // Check if comment is on a DONE issue → reopen it
+      const ownerRepo = await stateManager.getIssueOwnerRepo(e.projectSlug, e.issueIid)
+      if (ownerRepo) {
+        const issueStatus = stateManager.getIssueStatusInRepo(e.projectSlug, ownerRepo, e.issueIid)
+        if (issueStatus === 'DONE') {
+          log.info({ projectSlug: e.projectSlug, iid: e.issueIid }, 'Reopening DONE issue due to comment')
+          await stateManager.updateIssueStatus(e.projectSlug, ownerRepo, e.issueIid, 'REOPENED')
+          await stateManager.prependToPlannedOrder(e.projectSlug, ownerRepo, e.issueIid)
+          if (state.phase === 'IMPLEMENTING') {
+            startImplementationLoop(e.projectSlug).catch((err) =>
+              log.error({ err, projectSlug: e.projectSlug }, 'Phase 2 loop error'),
+            )
+          }
+          break
         }
+      }
+
+      if (state.phase === 'AWAITING_REVIEW') {
+        await handlePlanFeedback(e, config)
       } else if (state.phase === 'IMPLEMENTING') {
         await handleIssueCommentDuringImplementation(e)
       }
@@ -59,6 +68,20 @@ async function dispatch(event: AgentEvent): Promise<void> {
       const state = await stateManager.getGroupState(e.projectSlug)
       if (!state) break
 
+      // Docs MR approved → trigger planning phase
+      if (e.action === 'approved'
+          && state.docsMrIid != null
+          && state.docsMrIid === e.mrIid
+          && state.phase === 'AWAITING_REVIEW') {
+        log.info({ projectSlug: e.projectSlug, mrIid: e.mrIid }, 'Docs MR approved — starting planning phase')
+        await stateManager.transitionGroupPhase(e.projectSlug, 'PLANNING')
+        startPlanningPhase(e.projectSlug).catch((err) =>
+          log.error({ err, projectSlug: e.projectSlug }, 'Planning phase error'),
+        )
+        break
+      }
+
+      // Code MRs (phase 3)
       if (state.phase === 'AWAITING_MR_REVIEW' || state.phase === 'MR_CREATED') {
         await handleMRReviewEvent(e)
       }
@@ -70,7 +93,43 @@ async function dispatch(event: AgentEvent): Promise<void> {
       const state = await stateManager.getGroupState(e.projectSlug)
       if (!state) break
 
-      if (state.phase === 'AWAITING_MR_REVIEW' || state.phase === 'MR_APPROVED') {
+      // Check if this MR belongs to a task issue
+      const repoStates = await stateManager.getAllRepoStates(e.projectSlug)
+      let handledAsTaskMr = false
+      for (const rs of repoStates) {
+        const entry = Object.entries(rs.issueToMr).find(([, mrIid]) => mrIid === e.mrIid)
+        if (entry) {
+          const iid = Number(entry[0])
+          await stateManager.updateIssueStatus(e.projectSlug, rs.repoName, iid, 'DONE')
+
+          // Close issue on GitLab via API
+          try {
+            const closeUrl = `${config.gitlab.url}/api/v4/projects/${rs.gitlabProjectId}/issues/${iid}`
+            await fetch(closeUrl, {
+              method: 'PUT',
+              headers: { 'PRIVATE-TOKEN': config.gitlab.token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state_event: 'close' }),
+            })
+            log.info({ projectSlug: e.projectSlug, iid }, 'Issue closed on GitLab')
+          } catch (err) {
+            log.warn({ err, iid }, 'Failed to close issue on GitLab')
+          }
+
+          // Cleanup worktree
+          const checkpoint = stateManager.getCheckpoint(e.projectSlug, rs.repoName, iid)
+          if (checkpoint?.worktreePath) {
+            const { removeWorktree } = await import('../utils/worktree.js')
+            removeWorktree(rs.repoName, checkpoint.worktreePath)
+          }
+
+          handledAsTaskMr = true
+          log.info({ projectSlug: e.projectSlug, iid, mrIid: e.mrIid }, 'Task MR merged — issue closed')
+          break
+        }
+      }
+
+      // If not a task MR, handle as group/phase MR (phase 4)
+      if (!handledAsTaskMr && (state.phase === 'AWAITING_MR_REVIEW' || state.phase === 'MR_APPROVED')) {
         await runPhase4(e.projectSlug)
       }
       break
