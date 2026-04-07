@@ -150,12 +150,11 @@ mkdir -p "$WS"
 echo "==> Workspace: $WS"
 
 # ── 9. Build ──────────────────────────────────────────────────────────────────
-if [ "$1" = "--build" ] || [ ! -f "$PROJECT_DIR/dist/index.js" ]; then
-  echo "==> Building..."
-  pnpm install --frozen-lockfile
-  pnpm build
-  pnpm ui:build
-fi
+# Always build: ensures deploy picks up latest source after git pull
+echo "==> Building..."
+pnpm install --frozen-lockfile
+pnpm build
+pnpm ui:build
 
 # ── 10. Start ─────────────────────────────────────────────────────────────────
 echo "============================================"
