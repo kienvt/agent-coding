@@ -1,5 +1,5 @@
 import { db } from '../db/index.js'
-import type { ProjectPhase, IssueStatus, ProjectGroupState, RepoState } from './types.js'
+import type { ProjectPhase, IssueStatus, ProjectGroupState, RepoState, CheckpointData } from './types.js'
 import { createLogger } from '../utils/logger.js'
 import { logStore } from '../utils/log-store.js'
 
@@ -9,6 +9,7 @@ type GroupRow = {
   project_slug: string
   phase: string
   req_file: string | null
+  docs_mr_iid: number | null
   error: string | null
   started_at: number
   updated_at: number
@@ -21,6 +22,9 @@ type RepoRow = {
   phase: string
   issue_iids: string
   issue_statuses: string
+  planned_order: string
+  issue_to_mr: string
+  checkpoints: string
   current_issue: number | null
   mr_iid: number | null
   error: string | null
@@ -33,6 +37,7 @@ function rowToGroupState(row: GroupRow): ProjectGroupState {
     projectSlug: row.project_slug,
     phase: row.phase as ProjectPhase,
     requirementFile: row.req_file ?? undefined,
+    docsMrIid: row.docs_mr_iid ?? undefined,
     startedAt: new Date(row.started_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     error: row.error ?? undefined,
@@ -47,6 +52,9 @@ function rowToRepoState(row: RepoRow): RepoState {
     phase: row.phase as ProjectPhase,
     issueIids: JSON.parse(row.issue_iids) as number[],
     issueStatuses: JSON.parse(row.issue_statuses) as Record<number, IssueStatus>,
+    plannedOrder: JSON.parse(row.planned_order ?? '[]') as number[],
+    issueToMr: JSON.parse(row.issue_to_mr ?? '{}') as Record<string, number>,
+    checkpoints: JSON.parse(row.checkpoints ?? '{}') as Record<string, CheckpointData>,
     currentIssueIid: row.current_issue ?? undefined,
     mrIid: row.mr_iid ?? undefined,
     error: row.error ?? undefined,
@@ -66,6 +74,10 @@ const groupStmts = {
   `),
   setError: db.prepare(`
     UPDATE project_group_state SET phase = 'ERROR', error = @error, updated_at = @now
+    WHERE project_slug = @slug
+  `),
+  setDocsMrIid: db.prepare(`
+    UPDATE project_group_state SET docs_mr_iid = @mrIid, updated_at = @now
     WHERE project_slug = @slug
   `),
   delete: db.prepare('DELETE FROM project_group_state WHERE project_slug = ?'),
@@ -100,6 +112,18 @@ const repoStmts = {
   `),
   setError: db.prepare(`
     UPDATE repo_state SET phase = 'ERROR', error = @error, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updatePlannedOrder: db.prepare(`
+    UPDATE repo_state SET planned_order = @plannedOrder, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updateIssueToMr: db.prepare(`
+    UPDATE repo_state SET issue_to_mr = @issueToMr, updated_at = @now
+    WHERE project_slug = @slug AND repo_name = @repoName
+  `),
+  updateCheckpoints: db.prepare(`
+    UPDATE repo_state SET checkpoints = @checkpoints, updated_at = @now
     WHERE project_slug = @slug AND repo_name = @repoName
   `),
   deleteAll: db.prepare('DELETE FROM repo_state WHERE project_slug = ?'),
@@ -297,6 +321,95 @@ export class StateManager {
       module: 'state-manager',
       msg: `[${repoName}] Error: ${message}`,
     }).catch(() => {/* non-critical */})
+  }
+
+  // ── New v2 methods ────────────────────────────────────────────────
+
+  setDocsMrIid(slug: string, mrIid: number): Promise<void> {
+    groupStmts.setDocsMrIid.run({ mrIid, now: Date.now(), slug })
+    log.info({ slug, mrIid }, 'Docs MR IID saved')
+    return Promise.resolve()
+  }
+
+  setPlannedOrder(slug: string, repoName: string, iids: number[]): Promise<void> {
+    repoStmts.updatePlannedOrder.run({ plannedOrder: JSON.stringify(iids), now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, count: iids.length }, 'Planned order set')
+    return Promise.resolve()
+  }
+
+  getNextPlannedIssue(slug: string, repoName: string): Promise<number | null> {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return Promise.resolve(null)
+
+    const plannedOrder = JSON.parse(row.planned_order ?? '[]') as number[]
+    const statuses = JSON.parse(row.issue_statuses) as Record<number, IssueStatus>
+    const skip = new Set<IssueStatus>(['DONE', 'CLOSED', 'MR_OPEN'])
+
+    // Prefer INTERRUPTED first, then OPEN/REOPENED
+    const interrupted = plannedOrder.find((iid) => statuses[iid] === 'INTERRUPTED')
+    if (interrupted != null) return Promise.resolve(interrupted)
+    const next = plannedOrder.find((iid) => !skip.has(statuses[iid])) ?? null
+    return Promise.resolve(next)
+  }
+
+  setIssueMr(slug: string, repoName: string, iid: number, mrIid: number): Promise<void> {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return Promise.resolve()
+
+    const issueToMr = JSON.parse(row.issue_to_mr ?? '{}') as Record<string, number>
+    issueToMr[String(iid)] = mrIid
+    repoStmts.updateIssueToMr.run({ issueToMr: JSON.stringify(issueToMr), now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, iid, mrIid }, 'Issue→MR mapping saved')
+    return Promise.resolve()
+  }
+
+  prependToPlannedOrder(slug: string, repoName: string, iid: number): Promise<void> {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return Promise.resolve()
+
+    const plannedOrder = JSON.parse(row.planned_order ?? '[]') as number[]
+    const filtered = plannedOrder.filter((i) => i !== iid)
+    filtered.unshift(iid)
+    repoStmts.updatePlannedOrder.run({ plannedOrder: JSON.stringify(filtered), now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, iid }, 'Issue prepended to planned order')
+    return Promise.resolve()
+  }
+
+  getIssueOwnerRepo(slug: string, iid: number): Promise<string | null> {
+    const rows = repoStmts.getAll.all(slug)
+    for (const row of rows) {
+      const issueToMr = JSON.parse(row.issue_to_mr ?? '{}') as Record<string, number>
+      if (String(iid) in issueToMr) return Promise.resolve(row.repo_name)
+      // Also check if issue is tracked in this repo's issue list
+      const iids = JSON.parse(row.issue_iids) as number[]
+      if (iids.includes(iid)) return Promise.resolve(row.repo_name)
+    }
+    return Promise.resolve(null)
+  }
+
+  getIssueStatusInRepo(slug: string, repoName: string, iid: number): IssueStatus | null {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return null
+    const statuses = JSON.parse(row.issue_statuses) as Record<number, IssueStatus>
+    return statuses[iid] ?? null
+  }
+
+  saveCheckpoint(slug: string, repoName: string, iid: number, data: CheckpointData): Promise<void> {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return Promise.resolve()
+
+    const checkpoints = JSON.parse(row.checkpoints ?? '{}') as Record<string, CheckpointData>
+    checkpoints[String(iid)] = data
+    repoStmts.updateCheckpoints.run({ checkpoints: JSON.stringify(checkpoints), now: Date.now(), slug, repoName })
+    log.info({ slug, repoName, iid }, 'Checkpoint saved')
+    return Promise.resolve()
+  }
+
+  getCheckpoint(slug: string, repoName: string, iid: number): CheckpointData | null {
+    const row = repoStmts.get.get(slug, repoName)
+    if (!row) return null
+    const checkpoints = JSON.parse(row.checkpoints ?? '{}') as Record<string, CheckpointData>
+    return checkpoints[String(iid)] ?? null
   }
 }
 
