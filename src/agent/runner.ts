@@ -4,6 +4,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getConfig } from "../config/index.js";
 import { AgentError } from "../utils/errors.js";
 import { createLogger } from "../utils/logger.js";
+import { retry } from "../utils/retry.js";
 import { logStore } from "../utils/log-store.js";
 
 const log = createLogger("agent-runner");
@@ -108,60 +109,95 @@ export class AgentRunner {
     let turns = 0;
     let interrupted = false;
 
-    try {
-      const messages = query({
-        prompt,
-        options: {
-          cwd,
-          allowedTools,
-          // God mode: bypass all permission checks — safe because we run in an isolated container
-          // Note: allowDangerouslySkipPermissions is intentionally omitted — it's blocked when running as root (Docker default)
-          permissionMode: "bypassPermissions",
-          maxTurns,
-          systemPrompt: systemContext,
-          // Required for SDK to load .claude/commands/ and .claude/skills/ from the project dir
-          settingSources: ['user', 'project'],
-          // Capture stderr so exit-code-1 errors are visible in logs
-          stderr: (text: string) => {
-            const trimmed = text.trim();
-            if (trimmed)
-              log.error({ cwd, stderr: trimmed }, "Claude Code stderr");
-          },
-        },
-      });
+    const isOverloaded = (err: Error) =>
+      err.message.includes("529") || err.message.includes("overloaded_error");
+    const isRateLimited = (err: Error) =>
+      err.message.includes("429") || err.message.includes("rate_limit");
 
-      for await (const message of messages) {
-        if (message.type === "assistant") {
-          for (const block of message.message.content) {
-            if (block.type === "text") {
-              output += block.text;
-              onProgress?.(block.text);
-              // Stream agent output to log store if projectSlug is provided
-              if (projectSlug && block.text.trim()) {
-                await logStore
-                  .append(projectSlug, {
-                    level: "agent",
-                    module: "agent-runner",
-                    msg: block.text.slice(0, 500),
-                  })
-                  .catch(() => {
-                    /* non-critical */
-                  });
+    try {
+      await retry(
+        async () => {
+          output = "";
+          turns = 0;
+          interrupted = false;
+          cost = undefined;
+
+          const messages = query({
+            prompt,
+            options: {
+              cwd,
+              allowedTools,
+              // God mode: bypass all permission checks — safe because we run in an isolated container
+              // Note: allowDangerouslySkipPermissions is intentionally omitted — it's blocked when running as root (Docker default)
+              permissionMode: "bypassPermissions",
+              maxTurns,
+              systemPrompt: systemContext,
+              // Required for SDK to load .claude/commands/ and .claude/skills/ from the project dir
+              settingSources: ["user", "project"],
+              // Capture stderr so exit-code-1 errors are visible in logs
+              stderr: (text: string) => {
+                const trimmed = text.trim();
+                if (trimmed)
+                  log.error({ cwd, stderr: trimmed }, "Claude Code stderr");
+              },
+            },
+          });
+
+          for await (const message of messages) {
+            if (message.type === "assistant") {
+              for (const block of message.message.content) {
+                if (block.type === "text") {
+                  output += block.text;
+                  onProgress?.(block.text);
+                  // Stream agent output to log store if projectSlug is provided
+                  if (projectSlug && block.text.trim()) {
+                    await logStore
+                      .append(projectSlug, {
+                        level: "agent",
+                        module: "agent-runner",
+                        msg: block.text.slice(0, 500),
+                      })
+                      .catch(() => {
+                        /* non-critical */
+                      });
+                  }
+                }
+              }
+              turns++;
+            } else if (message.type === "result") {
+              if (message.subtype === "success") {
+                cost = message.total_cost_usd;
+                durationMs = Date.now() - startMs;
+              } else if (message.subtype === "error_max_turns") {
+                interrupted = true;
+                durationMs = Date.now() - startMs;
+                log.warn(
+                  { cwd, turns },
+                  "Agent hit max turns — marking as interrupted",
+                );
               }
             }
           }
-          turns++;
-        } else if (message.type === "result") {
-          if (message.subtype === "success") {
-            cost = message.total_cost_usd;
-            durationMs = Date.now() - startMs;
-          } else if (message.subtype === "error_max_turns") {
-            interrupted = true;
-            durationMs = Date.now() - startMs;
-            log.warn({ cwd, turns }, "Agent hit max turns — marking as interrupted");
-          }
-        }
-      }
+        },
+        {
+          maxAttempts: 5,
+          initialDelay: 60_000,
+          maxDelay: 300_000,
+          factor: 2,
+          shouldRetry: (err) => {
+            if (isRateLimited(err)) {
+              log.error({ error: err.message }, "API rate limit hit — not retrying");
+              return false;
+            }
+            return isOverloaded(err);
+          },
+          onRetry: (err, attempt) =>
+            log.warn(
+              { attempt, error: err.message },
+              "API overloaded (529) — retrying agent run after delay",
+            ),
+        },
+      );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error({ cwd, error: errMsg }, "Agent run failed");

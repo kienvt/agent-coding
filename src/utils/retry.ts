@@ -7,6 +7,7 @@ export interface RetryOptions {
   initialDelay?: number
   maxDelay?: number
   factor?: number
+  shouldRetry?: (error: Error) => boolean
   onRetry?: (error: Error, attempt: number) => void
 }
 
@@ -23,6 +24,7 @@ export async function retry<T>(
     initialDelay = 1000,
     maxDelay = 30000,
     factor = 2,
+    shouldRetry,
     onRetry,
   } = options
 
@@ -36,6 +38,7 @@ export async function retry<T>(
       lastError = err instanceof Error ? err : new Error(String(err))
 
       if (attempt === maxAttempts) break
+      if (shouldRetry && !shouldRetry(lastError)) throw lastError
 
       const waitMs = Math.min(delay, maxDelay)
       log.warn({ attempt, maxAttempts, delayMs: waitMs, error: lastError.message }, 'Retrying after error')
